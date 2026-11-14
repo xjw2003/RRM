@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rrm"
+version = "0.2.0"
+description = "A model-independent runtime for external reasoning graphs"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["pydantic>=2.10,<3", "jsonschema>=4.22,<5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.11"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
