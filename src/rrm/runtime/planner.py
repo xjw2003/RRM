@@ -1,14 +1,22 @@
 from collections.abc import Callable
 from concurrent.futures import Future, wait
-from threading import Thread
+from threading import Event, Thread
 from time import monotonic
-from typing import TypeVar
+from typing import Literal, TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
 
+from rrm.adapters.cancellation import InvocationControl, _invocation
 from rrm.adapters.model_base import ModelReply
-from rrm.exceptions import InvalidOutput, LimitReached, RRMError
-from rrm.protocol.models import Limits
+from rrm.exceptions import (
+    AdapterRequestTimeout,
+    InvalidOutput,
+    InvocationAborted,
+    LimitReached,
+    RRMError,
+)
+from rrm.protocol.models import InvocationStop, Limits
 from rrm.protocol.validation import content_hash
 
 T = TypeVar("T")
@@ -35,25 +43,67 @@ class ExecutionBudget:
         if self.limits.max_tokens is not None and self.tokens >= self.limits.max_tokens:
             raise LimitReached("max_tokens reached")
 
-    def invoke(self, function: Callable[[], T], timeout: float, label: str) -> T:
-        remaining = self.check_time()
+    def invoke(
+        self,
+        function: Callable[[], T],
+        timeout: float,
+        label: str,
+        *,
+        execution_id: str | None = None,
+    ) -> T:
+        self.check_time()
+        deadline = min(self.deadline, monotonic() + timeout)
         result: Future[T] = Future()
+        cancelled = Event()
+        control = InvocationControl(execution_id or uuid4().hex, cancelled)
 
         def worker() -> None:
+            token = _invocation.set(control)
             try:
-                result.set_result(function())
+                if cancelled.is_set():
+                    result.set_exception(TimeoutError("Invocation cancelled before dispatch"))
+                    return
+                value = function()
             except BaseException as exc:
                 result.set_exception(exc)
+            else:
+                result.set_result(value)
+            finally:
+                _invocation.reset(token)
 
-        # A late return has no path to the graph or storage.
+        def stop(
+            reason: Literal["request_timeout", "wait_timeout", "run_timeout", "cancelled"],
+            message: str,
+            *,
+            request_cancel: bool,
+        ) -> InvocationAborted:
+            if request_cancel:
+                cancelled.set()
+            return InvocationAborted(
+                message,
+                InvocationStop(
+                    execution_id=control.execution_id,
+                    reason=reason,
+                    worker_state="exited" if result.done() else "unknown",
+                    cancellation_requested=request_cancel,
+                ),
+            )
+
+        # The worker receives only the request. Only this caller can commit its result.
         Thread(target=worker, daemon=True).start()
-        done, _ = wait((result,), timeout=min(remaining, timeout))
-        if not done:
-            if remaining <= timeout:
-                raise LimitReached("timeout_seconds reached")
-            raise RRMError(f"{label} timed out")
-        self.check_time()
-        return result.result()
+        try:
+            done, _ = wait((result,), timeout=max(0, deadline - monotonic()))
+            if done and monotonic() < deadline:
+                return result.result()
+        except (AdapterRequestTimeout, TimeoutError) as exc:
+            raise stop(
+                "request_timeout", f"{label} request timed out", request_cancel=False
+            ) from exc
+        except KeyboardInterrupt as exc:
+            raise stop("cancelled", f"{label} cancelled", request_cancel=True) from exc
+        if deadline == self.deadline:
+            raise stop("run_timeout", "timeout_seconds reached", request_cancel=True)
+        raise stop("wait_timeout", f"{label} timed out", request_cancel=True)
 
     def model_response(
         self,
@@ -63,7 +113,8 @@ class ExecutionBudget:
         timeout: float,
         retries: int,
         label: str,
-        on_attempt: Callable[[Response | None, str | None], None] | None = None,
+        on_attempt: Callable[[Response | None, str | None, InvocationStop | None], None]
+        | None = None,
     ) -> Response:
         last_error: str | None = None
         for _ in range(retries + 1):
@@ -95,12 +146,16 @@ class ExecutionBudget:
                 last_error = f"{label}: {exc}"
             except Exception as exc:
                 if on_attempt is not None:
-                    on_attempt(None, str(exc) if isinstance(exc, RRMError) else type(exc).__name__)
+                    on_attempt(
+                        None,
+                        str(exc) if isinstance(exc, RRMError) else type(exc).__name__,
+                        exc.stop if isinstance(exc, InvocationAborted) else None,
+                    )
                 raise
             else:
                 if on_attempt is not None:
-                    on_attempt(output, None)
+                    on_attempt(output, None, None)
                 return output
             if on_attempt is not None:
-                on_attempt(None, last_error)
+                on_attempt(None, last_error, None)
         raise InvalidOutput(last_error or f"{label}: invalid response")

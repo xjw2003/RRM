@@ -1,3 +1,6 @@
+from rrm.protocol.models import InvocationStop
+
+
 class RRMError(Exception):
     """A runtime error suitable for exposing in the run record."""
 
@@ -24,3 +27,13 @@ class StorageConflict(StorageError):
 
 class LimitReached(RRMError):
     """The runtime reached a configured execution limit."""
+
+
+class AdapterRequestTimeout(RRMError):
+    """The adapter reported a transport timeout."""
+
+
+class InvocationAborted(RRMError):
+    def __init__(self, message: str, stop: InvocationStop) -> None:
+        super().__init__(message)
+        self.stop = stop

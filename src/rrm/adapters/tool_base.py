@@ -15,6 +15,7 @@ class ToolAdapter(ABC):
     output_schema: dict[str, Any] = EVIDENCE_ITEMS.json_schema()
     timeout: float = 10
     max_calls: int | None = None
+    retry_safe: bool = False
     source_type: str
     source_id: str
 
@@ -25,6 +26,7 @@ class ToolAdapter(ABC):
 
 class MockRetrievalTool(ToolAdapter):
     name = "mock_search"
+    retry_safe = True
     description = "Search the synthetic local documents for query words."
     source_type = "mock_corpus"
     source_id = "local_fixture"

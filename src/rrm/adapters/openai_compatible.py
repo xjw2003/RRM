@@ -7,7 +7,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from pydantic import BaseModel, TypeAdapter
 
 from rrm.adapters.model_base import ExecutionContext, ModelAdapter, ModelReply, PlanningContext
-from rrm.exceptions import InvalidOutput, RRMError
+from rrm.exceptions import AdapterRequestTimeout, InvalidOutput, RRMError
 from rrm.protocol.models import FinalOutput, ModelOutput, OperationProposal, PositiveSeconds
 
 
@@ -67,7 +67,11 @@ class OpenAICompatibleAdapter(ModelAdapter):
         except HTTPError as exc:
             exc.close()
             raise RRMError(f"Model HTTP request failed with status {exc.code}") from None
-        except (URLError, TimeoutError, OSError) as exc:
+        except (URLError, OSError) as exc:
+            if isinstance(exc, TimeoutError) or (
+                isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
+            ):
+                raise AdapterRequestTimeout("Model HTTP request timed out") from None
             raise RRMError(f"Model HTTP transport failed ({type(exc).__name__})") from None
         except (ValueError, UnicodeError) as exc:
             raise InvalidOutput("Model HTTP response is not JSON") from exc
@@ -90,6 +94,8 @@ class OpenAICompatibleAdapter(ModelAdapter):
             "Select the next operation and existing input IDs. "
             "Use the objective to describe the task for this operation. "
             "Place intermediate judgments in execution results. "
+            "Use only IDs in nodes as inputs. Treat unverified_node_ids as provisional. "
+            "blocked_nodes contains repair diagnostics only; use available inputs to retry. "
             "RETRIEVE requires a listed tool and schema-valid parameters. "
             "COMPUTE takes two ordered numeric inputs and an operator. "
             "INFER, COMPARE and FINISH take an objective and input IDs. "

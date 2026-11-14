@@ -11,11 +11,13 @@ from rrm.protocol.models import (
     FinalOutput,
     ModelOutput,
     NodeInput,
+    NodeUsability,
     OperationProposal,
     ReasoningDependency,
     ReasoningNode,
     ReasoningOperation,
     ReasoningRun,
+    RecoveryResult,
     RunEvent,
     RunResult,
     VerificationRecord,
@@ -49,6 +51,8 @@ def protocol_schema() -> dict[str, Any]:
         FinalOutput,
         EvidenceItem,
         RunResult,
+        RecoveryResult,
+        NodeUsability,
         RunEvent,
     ]
     _, schema = models_json_schema([(model, "validation") for model in models], title="RRP v0.1")

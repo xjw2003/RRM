@@ -9,6 +9,7 @@ from rrm.protocol.models import (
     NodeType,
     OperationStatus,
     OperationType,
+    ReasoningNode,
     VerificationRecord,
     VerificationStatus,
 )
@@ -43,74 +44,90 @@ class ProvenanceVerifier(Verifier):
 
     def verify(self, graph: ReasoningGraph) -> Iterator[VerificationRecord]:
         for node in graph.nodes.values():
-            if node.node_type != NodeType.EVIDENCE:
-                continue
-            provenance = node.provenance
-            producer = graph.operations.get(node.produced_by or "")
-            registered_origin = (
-                producer is not None
-                and producer.operation_type == OperationType.RETRIEVE
-                and producer.executor_type == "tool"
-                and producer.status == OperationStatus.COMPLETED
-                and node.node_id in producer.output_node_ids
-                and graph.parents(node.node_id) == {producer.operation_id}
-            )
-            if not registered_origin or provenance is None:
-                yield self.record(
-                    node.node_id,
-                    "node",
-                    "provenance_snapshot",
-                    VerificationStatus.NOT_VERIFIED,
-                    reason="No recorded retrieval origin and source snapshot",
-                    scope=_SCOPE,
-                )
-                continue
-            digest = content_hash(provenance.content)
-            if (
-                digest != provenance.content_hash
-                or digest != node.content_hash
-                or (digest != content_hash(node.content))
-            ):
-                yield self.record(
-                    node.node_id,
-                    "node",
-                    "provenance_snapshot",
-                    VerificationStatus.FAILED,
-                    reason="Evidence snapshot hash mismatch",
-                    scope=_SCOPE,
-                )
-                continue
+            yield from self.verify_node(graph, node)
+
+    def verify_node(
+        self, graph: ReasoningGraph, node: ReasoningNode
+    ) -> Iterator[VerificationRecord]:
+        if node.node_type != NodeType.EVIDENCE:
+            return
+        provenance = node.provenance
+        producer = graph.operations.get(node.produced_by or "")
+        registered_origin = (
+            producer is not None
+            and producer.operation_type == OperationType.RETRIEVE
+            and producer.executor_type == "tool"
+            and producer.status == OperationStatus.COMPLETED
+            and node.node_id in producer.output_node_ids
+            and graph.parents(node.node_id) == {producer.operation_id}
+        )
+        if registered_origin and provenance is None:
             yield self.record(
                 node.node_id,
                 "node",
                 "provenance_snapshot",
-                VerificationStatus.PASSED,
-                source_id=provenance.source_id,
-                document_version=provenance.document_version,
+                VerificationStatus.FAILED,
+                reason="Retrieval output is missing its source snapshot",
                 scope=_SCOPE,
             )
-            source = self.sources.get((provenance.source_type, provenance.source_id))
-            doc, version = provenance.document_id, provenance.document_version
-            status = VerificationStatus.NOT_VERIFIED
-            reason = "No source adapter or pinned document version"
-            if source is not None and doc and version:
-                try:
-                    budget = ExecutionBudget(Limits(timeout_seconds=source.timeout))
-                    fetched = budget.invoke(
-                        lambda: source.fetch_version(doc, version), source.timeout, "Source lookup"
-                    )
-                    fetched_hash = content_hash(TypeAdapter(JsonValue).validate_python(fetched))
-                except Exception as exc:
-                    reason = f"Source lookup failed ({type(exc).__name__})"
-                else:
-                    matches = fetched_hash == digest
-                    status = VerificationStatus.PASSED if matches else VerificationStatus.FAILED
-                    reason = "Source version matches" if matches else "Source version differs"
+            return
+        if not registered_origin:
             yield self.record(
                 node.node_id,
                 "node",
-                "source_version",
-                status,
-                reason=reason,
+                "provenance_snapshot",
+                VerificationStatus.NOT_VERIFIED,
+                reason="No recorded retrieval origin and source snapshot",
                 scope=_SCOPE,
             )
+            return
+        assert provenance is not None
+        digest = content_hash(provenance.content)
+        if (
+            digest != provenance.content_hash
+            or digest != node.content_hash
+            or (digest != content_hash(node.content))
+        ):
+            yield self.record(
+                node.node_id,
+                "node",
+                "provenance_snapshot",
+                VerificationStatus.FAILED,
+                reason="Evidence snapshot hash mismatch",
+                scope=_SCOPE,
+            )
+            return
+        yield self.record(
+            node.node_id,
+            "node",
+            "provenance_snapshot",
+            VerificationStatus.PASSED,
+            source_id=provenance.source_id,
+            document_version=provenance.document_version,
+            scope=_SCOPE,
+        )
+        source = self.sources.get((provenance.source_type, provenance.source_id))
+        doc, version = provenance.document_id, provenance.document_version
+        status = VerificationStatus.NOT_VERIFIED
+        reason = "No source adapter or pinned document version"
+        if source is not None and doc and version:
+            try:
+                budget = ExecutionBudget(Limits(timeout_seconds=source.timeout))
+                fetched = budget.invoke(
+                    lambda: source.fetch_version(doc, version), source.timeout, "Source lookup"
+                )
+                fetched_hash = content_hash(TypeAdapter(JsonValue).validate_python(fetched))
+            except Exception as exc:
+                reason = f"Source lookup failed ({type(exc).__name__})"
+            else:
+                matches = fetched_hash == digest
+                status = VerificationStatus.PASSED if matches else VerificationStatus.FAILED
+                reason = "Source version matches" if matches else "Source version differs"
+        yield self.record(
+            node.node_id,
+            "node",
+            "source_version",
+            status,
+            reason=reason,
+            scope=_SCOPE,
+        )

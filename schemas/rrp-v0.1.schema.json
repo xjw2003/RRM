@@ -121,6 +121,46 @@
       "title": "FinalOutput",
       "type": "object"
     },
+    "InvocationStop": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "minLength": 1,
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "request_timeout",
+            "wait_timeout",
+            "run_timeout",
+            "cancelled"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "worker_state": {
+          "enum": [
+            "exited",
+            "unknown"
+          ],
+          "title": "Worker State",
+          "type": "string"
+        },
+        "cancellation_requested": {
+          "title": "Cancellation Requested",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution_id",
+        "reason",
+        "worker_state",
+        "cancellation_requested"
+      ],
+      "title": "InvocationStop",
+      "type": "object"
+    },
     "JsonValue": {},
     "Limits": {
       "additionalProperties": false,
@@ -183,6 +223,56 @@
       "title": "ModelOutput",
       "type": "object"
     },
+    "NodeBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "cause_node_id": {
+          "minLength": 1,
+          "title": "Cause Node Id",
+          "type": "string"
+        },
+        "failed_checks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Failed Checks",
+          "type": "array"
+        },
+        "verification_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Ids",
+          "type": "array"
+        },
+        "reasons": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "cause_node_id",
+        "failed_checks",
+        "verification_ids"
+      ],
+      "title": "NodeBlock",
+      "type": "object"
+    },
     "NodeInvalidation": {
       "additionalProperties": false,
       "properties": {
@@ -225,6 +315,16 @@
       "title": "NodeInvalidation",
       "type": "object"
     },
+    "NodeState": {
+      "enum": [
+        "current",
+        "stale",
+        "superseded",
+        "revoked"
+      ],
+      "title": "NodeState",
+      "type": "string"
+    },
     "NodeType": {
       "enum": [
         "question",
@@ -236,6 +336,40 @@
       ],
       "title": "NodeType",
       "type": "string"
+    },
+    "NodeUsability": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_state": {
+          "$ref": "#/$defs/NodeState"
+        },
+        "status": {
+          "$ref": "#/$defs/UsabilityStatus"
+        },
+        "block": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "node_id",
+        "node_state",
+        "status"
+      ],
+      "title": "NodeUsability",
+      "type": "object"
     },
     "OperationProposal": {
       "additionalProperties": false,
@@ -290,7 +424,8 @@
       "enum": [
         "running",
         "completed",
-        "failed"
+        "failed",
+        "interrupted"
       ],
       "title": "OperationStatus",
       "type": "string"
@@ -309,6 +444,17 @@
     "PlanningRecord": {
       "additionalProperties": false,
       "properties": {
+        "invocation_stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvocationStop"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "model_id": {
           "minLength": 1,
           "title": "Model Id",
@@ -599,6 +745,27 @@
           "default": null,
           "title": "Output Snapshot Hash"
         },
+        "verification_required": {
+          "default": false,
+          "title": "Verification Required",
+          "type": "boolean"
+        },
+        "retry_safe": {
+          "default": false,
+          "title": "Retry Safe",
+          "type": "boolean"
+        },
+        "invocation_stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvocationStop"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "error": {
           "anyOf": [
             {
@@ -695,6 +862,86 @@
       "title": "ReasoningRun",
       "type": "object"
     },
+    "RecoveryRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "recovery_id": {
+          "minLength": 1,
+          "title": "Recovery Id",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "interrupted_operation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Interrupted Operation Ids",
+          "type": "array"
+        },
+        "settled_operation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Settled Operation Ids",
+          "type": "array"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recovery_id",
+        "reason"
+      ],
+      "title": "RecoveryRecord",
+      "type": "object"
+    },
+    "RecoveryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "recovery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pending_tool_operation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Pending Tool Operation Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "status"
+      ],
+      "title": "RecoveryResult",
+      "type": "object"
+    },
     "RunEvent": {
       "additionalProperties": false,
       "description": "One atomic change in an ordered, per-run event stream.",
@@ -760,6 +1007,44 @@
           },
           "title": "Verifications",
           "type": "array"
+        },
+        "verified_operation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Verified Operation Ids",
+          "type": "array"
+        },
+        "node_blocks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NodeBlock"
+          },
+          "title": "Node Blocks",
+          "type": "array"
+        },
+        "recovery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tool_confirmation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolConfirmation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "RunEvent",
@@ -831,6 +1116,45 @@
         "cancelled"
       ],
       "title": "RunStatus",
+      "type": "string"
+    },
+    "ToolConfirmation": {
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "minLength": 1,
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "reason"
+      ],
+      "title": "ToolConfirmation",
+      "type": "object"
+    },
+    "UsabilityStatus": {
+      "enum": [
+        "eligible",
+        "unverified",
+        "blocked",
+        "pending_verification",
+        "stale",
+        "superseded",
+        "revoked"
+      ],
+      "title": "UsabilityStatus",
       "type": "string"
     },
     "VerificationRecord": {

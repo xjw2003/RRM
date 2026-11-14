@@ -3,7 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from rrm.protocol.models import NodeInput, OperationType, Record
+from rrm.protocol.models import NodeBlock, NodeInput, OperationType, Record
 
 
 class ToolDescription(Record):
@@ -16,6 +16,8 @@ class PlanningContext(Record):
     goal: str
     nodes: tuple[NodeInput, ...]
     tools: tuple[ToolDescription, ...]
+    unverified_node_ids: tuple[str, ...] = ()
+    blocked_nodes: tuple[NodeBlock, ...] = ()
 
 
 class ExecutionContext(Record):

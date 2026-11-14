@@ -1,19 +1,28 @@
 from collections import defaultdict
 from collections.abc import Iterable
+from copy import copy
 from typing import Any, Self
 
 from rrm.exceptions import GraphError
 from rrm.protocol.models import (
+    NodeBlock,
     NodeInvalidation,
     NodeState,
+    NodeType,
+    NodeUsability,
     OperationStatus,
+    OperationType,
     PlanningRecord,
     ReasoningDependency,
     ReasoningNode,
     ReasoningOperation,
     ReasoningRun,
+    RecoveryRecord,
     RunEvent,
+    ToolConfirmation,
+    UsabilityStatus,
     VerificationRecord,
+    VerificationStatus,
 )
 
 
@@ -27,6 +36,12 @@ class ReasoningGraph:
         self.invalidations: dict[str, NodeInvalidation] = {}
         self.current_versions: dict[str, str] = {}
         self.verifications: list[VerificationRecord] = []
+        self.node_blocks: dict[str, NodeBlock] = {}
+        self.verified_operations: set[str] = set()
+        self._verified_snapshots: set[str] = set()
+        self._verified_computations: set[str] = set()
+        self.recoveries: list[RecoveryRecord] = []
+        self.tool_confirmations: dict[str, ToolConfirmation] = {}
         self.audit_issues: list[tuple[str, str]] = []
         self.sequence = 0
         self._parents: dict[str, set[str]] = defaultdict(set)
@@ -108,6 +123,79 @@ class ReasoningGraph:
             return NodeState.SUPERSEDED
         return NodeState.CURRENT
 
+    def node_usability(self, node_id: str) -> NodeUsability:
+        state = self.node_state(node_id)
+        block = self.node_blocks.get(node_id)
+        if state != NodeState.CURRENT:
+            status = UsabilityStatus(state.value)
+        elif block is not None:
+            status = UsabilityStatus.BLOCKED
+        else:
+            node = self.nodes[node_id]
+            op = self.operations.get(node.produced_by or "")
+            if op and op.verification_required and op.operation_id not in self.verified_operations:
+                status = UsabilityStatus.PENDING
+            elif node.node_type == NodeType.QUESTION:
+                status = UsabilityStatus.ELIGIBLE
+            elif op is None or op.executor_type == "model" or op.operation_type == "REVISE":
+                status = UsabilityStatus.UNVERIFIED
+            elif op.operation_type == OperationType.COMPUTE:
+                status = (
+                    UsabilityStatus.ELIGIBLE
+                    if op.operation_id in self._verified_computations
+                    else UsabilityStatus.UNVERIFIED
+                )
+            elif node_id in self._verified_snapshots:
+                status = UsabilityStatus.ELIGIBLE
+            else:
+                status = UsabilityStatus.UNVERIFIED
+        return NodeUsability(node_id=node_id, node_state=state, status=status, block=block)
+
+    def pending_tool_operations(self) -> tuple[str, ...]:
+        return tuple(
+            op.operation_id
+            for op in self.operations.values()
+            if op.executor_type == "tool"
+            and not op.retry_safe
+            and op.status == OperationStatus.INTERRUPTED
+            and op.operation_id not in self.tool_confirmations
+        )
+
+    def prepare(self, event: RunEvent) -> Self:
+        """Validate changes on detached collections before publishing a committed event."""
+        draft = copy(self)
+        if event.nodes:
+            draft.nodes = self.nodes.copy()
+            draft.current_versions = self.current_versions.copy()
+        if event.operations:
+            draft.operations = self.operations.copy()
+        if event.dependencies:
+            draft.dependencies = self.dependencies.copy()
+            draft._parents = self._parents.copy()
+            draft._children = self._children.copy()
+            for edge in event.dependencies:
+                start, end = edge.endpoints
+                draft._children[start] = set(self._children.get(start, ()))
+                draft._parents[end] = set(self._parents.get(end, ()))
+        if event.invalidations:
+            draft.invalidations = self.invalidations.copy()
+        if event.node_blocks:
+            draft.node_blocks = self.node_blocks.copy()
+        if event.verified_operation_ids:
+            draft.verified_operations = self.verified_operations.copy()
+        if event.verifications:
+            draft.verifications = self.verifications.copy()
+            draft._verified_snapshots = self._verified_snapshots.copy()
+            draft._verified_computations = self._verified_computations.copy()
+        if event.planning is not None:
+            draft.planning = self.planning.copy()
+        if event.recovery is not None:
+            draft.recoveries = self.recoveries.copy()
+        if event.tool_confirmation is not None:
+            draft.tool_confirmations = self.tool_confirmations.copy()
+        draft.apply(event)
+        return draft
+
     def apply(self, event: RunEvent, *, audit: bool = False) -> None:
         def reject(target_id: str, problem: GraphError) -> None:
             if not audit:
@@ -142,6 +230,7 @@ class ReasoningGraph:
                         "output_node_ids",
                         "output_snapshot_hash",
                         "error",
+                        "invocation_stop",
                     }
                     if operation.status == OperationStatus.RUNNING or (
                         previous.model_dump(exclude=final_fields)
@@ -165,9 +254,47 @@ class ReasoningGraph:
                 reject(invalidation.node_id, GraphError("Invalidation references a missing node"))
             else:
                 self.invalidations[invalidation.node_id] = invalidation
+        for block in event.node_blocks:
+            if block.node_id not in self.nodes or block.cause_node_id not in self.nodes:
+                reject(block.node_id, GraphError("Block references a missing node"))
+            else:
+                self.node_blocks.setdefault(block.node_id, block)
+        for op_id in event.verified_operation_ids:
+            if (
+                op_id not in self.operations
+                or self.operations[op_id].status != OperationStatus.COMPLETED
+            ):
+                reject(op_id, GraphError("Verification settlement requires a completed operation"))
+            else:
+                self.verified_operations.add(op_id)
         self.verifications.extend(event.verifications)
+        for record in event.verifications:
+            if record.status != VerificationStatus.PASSED:
+                continue
+            if record.verification_type == "provenance_snapshot":
+                self._verified_snapshots.add(record.target_id)
+            elif record.verification_type == "deterministic":
+                op = self.operations.get(record.target_id)
+                if (
+                    op
+                    and op.operation_type == OperationType.COMPUTE
+                    and all(
+                        node_id in self.nodes
+                        and self.node_usability(node_id).status == UsabilityStatus.ELIGIBLE
+                        for node_id in op.provided_node_ids
+                    )
+                ):
+                    self._verified_computations.add(record.target_id)
         if event.planning is not None:
             self.planning.append(event.planning)
+        if event.recovery is not None:
+            self.recoveries.append(event.recovery)
+        if event.tool_confirmation is not None:
+            op_id = event.tool_confirmation.operation_id
+            if op_id not in self.pending_tool_operations():
+                reject(op_id, GraphError("Tool confirmation requires a pending operation"))
+            else:
+                self.tool_confirmations[op_id] = event.tool_confirmation
         self.sequence += 1
 
     @classmethod
@@ -192,5 +319,12 @@ class ReasoningGraph:
             "current_versions": dict(self.current_versions),
             "node_states": {node_id: self.node_state(node_id) for node_id in self.nodes},
             "invalidations": [item.model_dump(mode="json") for item in self.invalidations.values()],
+            "node_blocks": [block.model_dump(mode="json") for block in self.node_blocks.values()],
+            "verified_operation_ids": sorted(self.verified_operations),
             "verifications": [item.model_dump(mode="json") for item in self.verifications],
+            "recoveries": [item.model_dump(mode="json") for item in self.recoveries],
+            "pending_tool_operation_ids": self.pending_tool_operations(),
+            "tool_confirmations": [
+                item.model_dump(mode="json") for item in self.tool_confirmations.values()
+            ],
         }

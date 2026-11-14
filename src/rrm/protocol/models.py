@@ -43,6 +43,36 @@ class NodeState(StrEnum):
     REVOKED = "revoked"
 
 
+class UsabilityStatus(StrEnum):
+    ELIGIBLE = "eligible"
+    UNVERIFIED = "unverified"
+    BLOCKED = "blocked"
+    PENDING = "pending_verification"
+    STALE = "stale"
+    SUPERSEDED = "superseded"
+    REVOKED = "revoked"
+
+
+class NodeBlock(Record):
+    node_id: NonEmpty
+    cause_node_id: NonEmpty
+    failed_checks: tuple[str, ...]
+    verification_ids: tuple[str, ...]
+    reasons: tuple[str, ...] = ()
+    recorded_at: datetime = Field(default_factory=now)
+
+
+class NodeUsability(Record):
+    node_id: NonEmpty
+    node_state: NodeState
+    status: UsabilityStatus
+    block: NodeBlock | None = None
+
+    @property
+    def usable(self) -> bool:
+        return self.status in (UsabilityStatus.ELIGIBLE, UsabilityStatus.UNVERIFIED)
+
+
 class OperationType(StrEnum):
     RETRIEVE = "RETRIEVE"
     INFER = "INFER"
@@ -55,6 +85,7 @@ class OperationStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 class DependencyType(StrEnum):
@@ -136,6 +167,13 @@ class NodeInput(Record):
     content: JsonValue
 
 
+class InvocationStop(Record):
+    execution_id: NonEmpty
+    reason: Literal["request_timeout", "wait_timeout", "run_timeout", "cancelled"]
+    worker_state: Literal["exited", "unknown"]
+    cancellation_requested: bool
+
+
 class ReasoningOperation(Record):
     operation_id: NonEmpty
     run_id: NonEmpty
@@ -152,6 +190,9 @@ class ReasoningOperation(Record):
     completed_at: datetime | None = None
     input_snapshot_hash: NonEmpty
     output_snapshot_hash: str | None = None
+    verification_required: bool = False
+    retry_safe: bool = False
+    invocation_stop: InvocationStop | None = None
     error: str | None = None
 
 
@@ -224,6 +265,7 @@ class EvidenceItem(Record):
 
 
 class PlanningRecord(Record):
+    invocation_stop: InvocationStop | None = None
     model_id: NonEmpty
     context_hash: NonEmpty
     proposed: OperationProposal | None = None
@@ -240,6 +282,27 @@ class RunResult(Record):
     error: str | None = None
 
 
+class RecoveryRecord(Record):
+    recovery_id: NonEmpty
+    reason: NonEmpty
+    interrupted_operation_ids: tuple[str, ...] = ()
+    settled_operation_ids: tuple[str, ...] = ()
+    recorded_at: datetime = Field(default_factory=now)
+
+
+class ToolConfirmation(Record):
+    operation_id: NonEmpty
+    reason: NonEmpty
+    recorded_at: datetime = Field(default_factory=now)
+
+
+class RecoveryResult(Record):
+    run_id: NonEmpty
+    status: RunStatus
+    recovery: RecoveryRecord | None = None
+    pending_tool_operation_ids: tuple[str, ...] = ()
+
+
 class RunEvent(Record):
     """One atomic change in an ordered, per-run event stream."""
 
@@ -250,3 +313,7 @@ class RunEvent(Record):
     planning: PlanningRecord | None = None
     invalidations: tuple[NodeInvalidation, ...] = ()
     verifications: tuple[VerificationRecord, ...] = ()
+    verified_operation_ids: tuple[str, ...] = ()
+    node_blocks: tuple[NodeBlock, ...] = ()
+    recovery: RecoveryRecord | None = None
+    tool_confirmation: ToolConfirmation | None = None

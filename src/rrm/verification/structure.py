@@ -1,11 +1,12 @@
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 from rrm.graph.dag import ReasoningGraph
 from rrm.protocol.models import (
     NodeState,
     NodeType,
     OperationStatus,
+    OperationType,
     ReasoningOperation,
     RunStatus,
     VerificationRecord,
@@ -31,6 +32,23 @@ class StructuralVerifier(Verifier):
             problems.append(f"Operation did not complete successfully ({op.status})")
         elif op.completed_at < op.started_at:
             problems.append("Operation timestamps are out of order")
+        if op.operation_type != "REVISE" and not op.input_node_ids:
+            problems.append("Operation has no declared inputs")
+        if op.status == OperationStatus.COMPLETED:
+            if op.operation_type != OperationType.RETRIEVE and len(op.output_node_ids) != 1:
+                problems.append("Operation must produce exactly one output")
+            if op.operation_type == OperationType.FINISH and any(
+                graph.nodes[node_id].node_type != NodeType.RESULT
+                for node_id in op.output_node_ids
+                if node_id in graph.nodes
+            ):
+                problems.append("FINISH output must be a result")
+            if op.operation_type == OperationType.RETRIEVE and any(
+                graph.nodes[node_id].node_type != NodeType.EVIDENCE
+                for node_id in op.output_node_ids
+                if node_id in graph.nodes
+            ):
+                problems.append("RETRIEVE output must be evidence")
         if op.input_node_ids != op.provided_node_ids:
             problems.append("Declared inputs differ from the provided inputs")
         for label, ids, adjacent, saved_hash in (
@@ -105,49 +123,58 @@ class StructuralVerifier(Verifier):
         yield self._check(graph.run.run_id, "run", run_problems)
 
         for op_id, op in graph.operations.items():
-            yield self._check(op_id, "operation", self._operation(graph, op) + issues[op_id])
-            unusable = [
-                node_id
-                for node_id in (*op.provided_node_ids, *op.output_node_ids)
-                if node_id in graph.nodes and graph.node_state(node_id) != NodeState.CURRENT
-            ]
-            yield self.record(
-                op_id,
-                "operation",
-                "current_validity",
-                VerificationStatus.FAILED if unusable else VerificationStatus.PASSED,
-                unavailable_node_ids=unusable,
-            )
+            yield from self.verify_operation(graph, op, issues[op_id])
+        for node_id in graph.nodes:
+            yield from self.verify_node(graph, node_id, issues[node_id])
 
-        for node_id, node in graph.nodes.items():
-            problems = list(issues[node_id])
-            if node.run_id != graph.run.run_id:
-                problems.append("Node belongs to a different run")
-            if content_hash(node.content) != node.content_hash:
-                problems.append("Node content hash mismatch")
-            producer = graph.operations.get(node.produced_by or "")
-            parents = graph.parents(node_id)
-            if node.node_type == NodeType.QUESTION and node.produced_by is None:
-                if parents or node.content != graph.run.goal:
-                    problems.append("Root question does not match the run")
-            elif (
-                producer is None
-                or parents != {node.produced_by}
-                or producer.status != OperationStatus.COMPLETED
-                or node_id not in producer.output_node_ids
-            ):
-                problems.append("Node lacks one consistent, completed producing operation")
-            yield self._check(node_id, "node", problems)
-            state = graph.node_state(node_id)
-            invalidation = graph.invalidations.get(node_id)
-            yield self.record(
-                node_id,
-                "node",
-                "current_validity",
-                VerificationStatus.PASSED
-                if state == NodeState.CURRENT
-                else VerificationStatus.FAILED,
-                state=state,
-                reason=invalidation.reason if invalidation else None,
-                cause_node_id=invalidation.cause_node_id if invalidation else None,
-            )
+    def verify_operation(
+        self, graph: ReasoningGraph, op: ReasoningOperation, issues: Sequence[str] = ()
+    ) -> Iterator[VerificationRecord]:
+        op_id = op.operation_id
+        yield self._check(op_id, "operation", self._operation(graph, op) + list(issues))
+        unusable = [
+            node_id
+            for node_id in (*op.provided_node_ids, *op.output_node_ids)
+            if node_id in graph.nodes and graph.node_state(node_id) != NodeState.CURRENT
+        ]
+        yield self.record(
+            op_id,
+            "operation",
+            "current_validity",
+            VerificationStatus.FAILED if unusable else VerificationStatus.PASSED,
+            unavailable_node_ids=unusable,
+        )
+
+    def verify_node(
+        self, graph: ReasoningGraph, node_id: str, issues: Sequence[str] = ()
+    ) -> Iterator[VerificationRecord]:
+        node = graph.nodes[node_id]
+        problems = list(issues)
+        if node.run_id != graph.run.run_id:
+            problems.append("Node belongs to a different run")
+        if content_hash(node.content) != node.content_hash:
+            problems.append("Node content hash mismatch")
+        producer = graph.operations.get(node.produced_by or "")
+        parents = graph.parents(node_id)
+        if node.node_type == NodeType.QUESTION and node.produced_by is None:
+            if parents or node.content != graph.run.goal:
+                problems.append("Root question does not match the run")
+        elif (
+            producer is None
+            or parents != {node.produced_by}
+            or producer.status != OperationStatus.COMPLETED
+            or node_id not in producer.output_node_ids
+        ):
+            problems.append("Node lacks one consistent, completed producing operation")
+        yield self._check(node_id, "node", problems)
+        state = graph.node_state(node_id)
+        invalidation = graph.invalidations.get(node_id)
+        yield self.record(
+            node_id,
+            "node",
+            "current_validity",
+            VerificationStatus.PASSED if state == NodeState.CURRENT else VerificationStatus.FAILED,
+            state=state,
+            reason=invalidation.reason if invalidation else None,
+            cause_node_id=invalidation.cause_node_id if invalidation else None,
+        )

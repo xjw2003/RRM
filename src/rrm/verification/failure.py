@@ -46,12 +46,27 @@ def inspect_failure(graph: ReasoningGraph, node_id: str) -> FailureReport:
     for verifier in (StructuralVerifier(), ProvenanceVerifier(), DeterministicVerifier()):
         for record in verifier.verify(graph):
             if record.verification_type != "source_version":
-                latest[(record.target_id, record.verifier_id, record.verification_type)] = record
-    failures = tuple(
-        record
+                key = (record.target_id, record.verifier_id, record.verification_type)
+                prior = latest.get(key)
+                if prior is None or prior.status != VerificationStatus.FAILED:
+                    latest[key] = record
+    block_ids = {
+        verification_id
+        for target in targets
+        if target in graph.node_blocks
+        for verification_id in graph.node_blocks[target].verification_ids
+    }
+    known_failures = {
+        record.verification_id: record
+        for record in graph.verifications
+        if record.verification_id in block_ids
+    }
+    known_failures.update(
+        (record.verification_id, record)
         for record in latest.values()
         if record.target_id in targets and record.status == VerificationStatus.FAILED
     )
+    failures = tuple(known_failures.values())
     located = set()
     for record in failures:
         if record.verification_type == "current_validity":

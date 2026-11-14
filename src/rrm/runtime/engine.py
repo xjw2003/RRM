@@ -8,7 +8,13 @@ from pydantic import JsonValue, TypeAdapter
 
 from rrm.adapters.model_base import ExecutionContext, ModelAdapter, ToolDescription
 from rrm.adapters.tool_base import EVIDENCE_ITEMS, ToolAdapter
-from rrm.exceptions import InvalidReference, LimitReached, RRMError, StorageError
+from rrm.exceptions import (
+    InvalidReference,
+    InvocationAborted,
+    LimitReached,
+    RRMError,
+    StorageError,
+)
 from rrm.graph.dag import ReasoningGraph
 from rrm.graph.dependencies import propagate_invalidation
 from rrm.protocol.models import (
@@ -16,11 +22,13 @@ from rrm.protocol.models import (
     EvidenceSnapshot,
     FinalOutput,
     InvalidationReport,
+    InvocationStop,
     Limits,
     ModelOutput,
     NodeInput,
     NodeState,
     NodeType,
+    NodeUsability,
     OperationProposal,
     OperationStatus,
     OperationType,
@@ -30,14 +38,18 @@ from rrm.protocol.models import (
     ReasoningNode,
     ReasoningOperation,
     ReasoningRun,
+    RecoveryRecord,
+    RecoveryResult,
     RunEvent,
     RunResult,
     RunStatus,
+    ToolConfirmation,
     VerificationRecord,
+    VerificationStatus,
     now,
 )
 from rrm.protocol.validation import content_hash, node_input, snapshot_hash
-from rrm.runtime.context import planning_context
+from rrm.runtime.context import ContextSelector
 from rrm.runtime.executor import arithmetic
 from rrm.runtime.planner import ExecutionBudget
 from rrm.storage import MemoryStorage, StorageBackend
@@ -48,6 +60,7 @@ from rrm.verification import (
     StructuralVerifier,
 )
 from rrm.verification.failure import FailureReport, inspect_failure
+from rrm.verification.usability import blocked_nodes
 
 
 class ReasoningRuntime:
@@ -58,12 +71,16 @@ class ReasoningRuntime:
         tools: Iterable[ToolAdapter] = (),
         *,
         model_retries: int = 1,
+        context_selector: ContextSelector | None = None,
     ) -> None:
         if type(model_retries) is not int or model_retries < 0:
             raise ValueError("model_retries must be a nonnegative integer")
         self.model = model
         self.storage = storage if storage is not None else MemoryStorage()
         self.model_retries = model_retries
+        self.context_selector = (
+            context_selector if context_selector is not None else ContextSelector()
+        )
         seconds = TypeAdapter(PositiveSeconds)
         self._model_timeout = seconds.validate_python(model.timeout)
         self.tools: dict[str, ToolAdapter] = {}
@@ -71,6 +88,8 @@ class ReasoningRuntime:
             if not tool.name or tool.name in self.tools:
                 raise ValueError(f"Missing or duplicate tool name {tool.name!r}")
             seconds.validate_python(tool.timeout)
+            if type(tool.retry_safe) is not bool:
+                raise ValueError("tool retry_safe must be a boolean")
             if tool.max_calls is not None and (
                 type(tool.max_calls) is not int or tool.max_calls < 0
             ):
@@ -92,12 +111,39 @@ class ReasoningRuntime:
         verifiers = (StructuralVerifier(), ProvenanceVerifier(sources), DeterministicVerifier())
         records = tuple(record for verifier in verifiers for record in verifier.verify(graph))
         if graph.run.status != RunStatus.RUNNING:
-            self.storage.append(run_id, graph.sequence, RunEvent(verifications=records))
+            blocks = blocked_nodes(graph, records)
+            run = graph.run
+            if set(run.final_node_ids).intersection(block.node_id for block in blocks):
+                run = run.model_copy(
+                    update={
+                        "status": RunStatus.PARTIAL,
+                        "updated_at": now(),
+                        "final_node_ids": (),
+                        "error": "Final answer blocked by verification",
+                    }
+                )
+            self._append(
+                graph,
+                RunEvent(
+                    run=run if run != graph.run else None,
+                    verifications=records,
+                    node_blocks=blocks,
+                    verified_operation_ids=tuple(
+                        op_id
+                        for op_id, operation in graph.operations.items()
+                        if operation.status == OperationStatus.COMPLETED
+                        and op_id not in graph.verified_operations
+                    ),
+                ),
+            )
         return records
 
     def inspect_failure(self, run_id: str, node_id: str) -> FailureReport:
         graph = self.storage.get_graph(run_id, audit=True)
         return inspect_failure(graph, node_id)
+
+    def get_node_usability(self, run_id: str, node_id: str) -> NodeUsability:
+        return self.get_graph(run_id).node_usability(node_id)
 
     def get_node(self, run_id: str, node_id: str) -> ReasoningNode:
         return self.get_graph(run_id).nodes[node_id]
@@ -111,14 +157,14 @@ class ReasoningRuntime:
         return self.storage.export_json(run_id)
 
     def _append(self, graph: ReasoningGraph, event: RunEvent) -> None:
-        sequence = graph.sequence
-        graph.apply(event)
+        draft = graph.prepare(event)
         try:
-            self.storage.append(graph.run.run_id, sequence, event)
+            self.storage.append(graph.run.run_id, graph.sequence, event)
         except StorageError:
             raise
         except Exception as exc:
             raise StorageError(f"Cannot commit run event ({type(exc).__name__})") from exc
+        graph.__dict__.update(draft.__dict__)
 
     @staticmethod
     def _new_node(
@@ -181,10 +227,116 @@ class ReasoningRuntime:
         self._set_status(graph, RunStatus.RUNNING)
         return self._drive(graph, run.limits)
 
+    def recover_run(
+        self, run_id: str, *, reason: str = "Execution owner stopped before completion"
+    ) -> RecoveryResult:
+        """Reconcile a stopped execution without calling any model or tool."""
+        graph = self.get_graph(run_id)
+        recovery = None
+        if graph.run.status == RunStatus.RUNNING:
+            if not reason.strip():
+                raise ValueError("Provide a recovery reason")
+            interrupted = tuple(
+                op for op in graph.operations.values() if op.status == OperationStatus.RUNNING
+            )
+            pending = tuple(
+                op
+                for op in graph.operations.values()
+                if op.status == OperationStatus.COMPLETED
+                and op.verification_required
+                and op.operation_id not in graph.verified_operations
+            )
+            recovery = RecoveryRecord(
+                recovery_id=uuid4().hex,
+                reason=reason,
+                interrupted_operation_ids=tuple(op.operation_id for op in interrupted),
+                settled_operation_ids=tuple(op.operation_id for op in pending),
+            )
+            finalized = tuple(
+                op.model_copy(
+                    update={
+                        "status": OperationStatus.INTERRUPTED,
+                        "completed_at": now(),
+                        "error": reason,
+                    }
+                )
+                for op in interrupted
+            )
+            run = graph.run
+            records: list[VerificationRecord] = []
+            for operation in pending:
+                records.extend(self._step_records(graph, operation))
+            blocks = blocked_nodes(graph, records)
+            bad = {block.node_id for block in blocks} | graph.node_blocks.keys()
+            final_ids = (
+                pending[-1].output_node_ids
+                if pending
+                and not interrupted
+                and pending[-1].operation_type == OperationType.FINISH
+                and not bad.intersection(pending[-1].output_node_ids)
+                and not any(
+                    record.target_id == pending[-1].operation_id
+                    and record.verification_type == "structure"
+                    and record.status == VerificationStatus.FAILED
+                    for record in records
+                )
+                else ()
+            )
+            run = graph.run.model_copy(
+                update={
+                    "status": RunStatus.COMPLETED if final_ids else RunStatus.PARTIAL,
+                    "updated_at": now(),
+                    "error": None if final_ids else reason,
+                    "final_node_ids": final_ids,
+                }
+            )
+            self._append(
+                graph,
+                RunEvent(
+                    run=run,
+                    operations=finalized,
+                    recovery=recovery,
+                    node_blocks=blocks,
+                    verifications=tuple(records),
+                    verified_operation_ids=recovery.settled_operation_ids,
+                ),
+            )
+        return RecoveryResult(
+            run_id=run_id,
+            status=graph.run.status,
+            recovery=recovery,
+            pending_tool_operation_ids=graph.pending_tool_operations(),
+        )
+
+    def confirm_tool_outcome(self, run_id: str, operation_id: str, *, reason: str) -> None:
+        if not reason.strip():
+            raise ValueError("Provide a confirmation reason")
+        graph = self.get_graph(run_id)
+        if operation_id not in graph.pending_tool_operations():
+            raise RRMError(f"Tool operation {operation_id!r} is not awaiting confirmation")
+        self._append(
+            graph,
+            RunEvent(
+                tool_confirmation=ToolConfirmation(
+                    operation_id=operation_id,
+                    reason=reason,
+                )
+            ),
+        )
+
     def resume(self, run_id: str, *, limits: Limits | None = None) -> RunResult:
         graph = self.get_graph(run_id)
         if graph.run.status == RunStatus.RUNNING:
-            raise RRMError("Cannot resume a running run")
+            raise RRMError("Cannot resume a running run; recover it after its execution stops")
+        if graph.pending_tool_operations():
+            raise RRMError("Confirm the outcome of pending tool operations before resuming")
+        if any(
+            op.status == OperationStatus.COMPLETED
+            and op.operation_id not in graph.verified_operations
+            for op in graph.operations.values()
+        ):
+            self.verify_run(run_id)
+            graph = self.get_graph(run_id)
         if graph.run.status == RunStatus.COMPLETED and not any(
             item.state == NodeState.STALE for item in graph.invalidations.values()
         ):
@@ -214,6 +366,7 @@ class ReasoningRuntime:
             executor_type="runtime",
             executor_id="manual_revision",
             objective=reason,
+            verification_required=True,
             input_snapshot_hash=snapshot_hash(()),
         )
         # Validate caller data before recording the operation. The old node's content
@@ -252,13 +405,14 @@ class ReasoningRuntime:
         self._append(
             graph,
             RunEvent(
-                run=run.model_copy(update={"updated_at": now()}),
+                run=run.model_copy(update={"updated_at": now(), "status": RunStatus.RUNNING}),
                 nodes=(replacement,),
                 operations=(completed,),
                 dependencies=(edge,),
                 invalidations=invalidations,
             ),
         )
+        self._verify_step(graph, completed, settled_run=run)
         return report
 
     def revoke_node(self, run_id: str, node_id: str, *, reason: str) -> InvalidationReport:
@@ -299,7 +453,7 @@ class ReasoningRuntime:
         return graph.run.model_copy(update=update)
 
     def _plan(self, graph: ReasoningGraph, budget: ExecutionBudget) -> OperationProposal:
-        context = planning_context(
+        context = self.context_selector.select(
             graph,
             (
                 ToolDescription(
@@ -310,7 +464,11 @@ class ReasoningRuntime:
         )
         digest = content_hash(context.model_dump(mode="json"))
 
-        def log(proposal: OperationProposal | None, error: str | None) -> None:
+        def log(
+            proposal: OperationProposal | None,
+            error: str | None,
+            stop: InvocationStop | None,
+        ) -> None:
             self._append(
                 graph,
                 RunEvent(
@@ -318,6 +476,7 @@ class ReasoningRuntime:
                         model_id=self.model.model_id,
                         context_hash=digest,
                         proposed=proposal,
+                        invocation_stop=stop,
                         error=error,
                     )
                 ),
@@ -342,6 +501,12 @@ class ReasoningRuntime:
                     break
             else:
                 raise LimitReached("max_steps reached")
+        except InvocationAborted as exc:
+            status = {
+                "run_timeout": RunStatus.PARTIAL,
+                "cancelled": RunStatus.CANCELLED,
+            }.get(exc.stop.reason, RunStatus.FAILED)
+            self._set_status(graph, status, error=str(exc))
         except LimitReached as exc:
             self._set_status(graph, RunStatus.PARTIAL, error=str(exc))
         except KeyboardInterrupt:
@@ -374,9 +539,9 @@ class ReasoningRuntime:
             node = graph.nodes.get(node_id)
             if node is None:
                 raise InvalidReference(f"Input node {node_id!r} does not exist in this run")
-            state = graph.node_state(node_id)
-            if state != NodeState.CURRENT:
-                raise InvalidReference(f"Input node {node_id!r} is {state}")
+            usability = graph.node_usability(node_id)
+            if not usability.usable:
+                raise InvalidReference(f"Input node {node_id!r} is {usability.status}")
             if node.content_hash != content_hash(node.content):
                 raise InvalidReference(f"Input node {node_id!r} has an invalid content hash")
             inputs.append(node_input(node))
@@ -414,6 +579,8 @@ class ReasoningRuntime:
             parameters=proposal.parameters,
             objective=proposal.objective,
             input_snapshot_hash=snapshot_hash(inputs),
+            verification_required=True,
+            retry_safe=tool is None or tool.retry_safe,
         )
 
         def edges(ids: Iterable[str], direction: DependencyType) -> tuple[ReasoningDependency, ...]:
@@ -452,35 +619,81 @@ class ReasoningRuntime:
             raise
         except (Exception, KeyboardInterrupt) as exc:
             error = str(exc) if isinstance(exc, RRMError) else type(exc).__name__
+            stop = exc.stop if isinstance(exc, InvocationAborted) else None
+            uncertain_effect = tool is not None and not operation.retry_safe
             failed = operation.model_copy(
                 update={
-                    "status": OperationStatus.FAILED,
+                    "status": OperationStatus.INTERRUPTED
+                    if uncertain_effect
+                    else OperationStatus.FAILED,
                     "completed_at": now(),
                     "error": error,
+                    "invocation_stop": stop,
                 }
             )
             self._append(graph, RunEvent(operations=(failed,)))
             if isinstance(exc, (RRMError, KeyboardInterrupt)):
                 raise
             raise RRMError(f"{kind} execution failed ({error})") from exc
-        finished = kind == OperationType.FINISH
-        run = graph.run.model_copy(
-            update={
-                "updated_at": now(),
-                "status": RunStatus.COMPLETED if finished else RunStatus.RUNNING,
-                "final_node_ids": output_ids if finished else (),
-            }
-        )
         self._append(
             graph,
             RunEvent(
-                run=run,
+                run=graph.run.model_copy(update={"updated_at": now()}),
                 operations=(completed,),
                 nodes=nodes,
                 dependencies=edges(output_ids, DependencyType.PRODUCES),
             ),
         )
+        return self._verify_step(graph, completed)
+
+    def _verify_step(
+        self,
+        graph: ReasoningGraph,
+        operation: ReasoningOperation,
+        *,
+        settled_run: ReasoningRun | None = None,
+    ) -> bool:
+        records = self._step_records(graph, operation)
+        blocks = blocked_nodes(graph, records)
+        finished = (
+            operation.operation_type == OperationType.FINISH
+            and bool(operation.output_node_ids)
+            and not blocks
+        )
+        run = settled_run or graph.run
+        if finished:
+            run = run.model_copy(
+                update={
+                    "status": RunStatus.COMPLETED,
+                    "final_node_ids": operation.output_node_ids,
+                    "error": None,
+                }
+            )
+        self._append(
+            graph,
+            RunEvent(
+                run=run.model_copy(update={"updated_at": now()}),
+                verifications=tuple(records),
+                node_blocks=blocks,
+                verified_operation_ids=(operation.operation_id,),
+            ),
+        )
         return finished
+
+    @staticmethod
+    def _step_records(
+        graph: ReasoningGraph, operation: ReasoningOperation
+    ) -> list[VerificationRecord]:
+        structure = StructuralVerifier()
+        provenance = ProvenanceVerifier()
+        records = [
+            *structure.verify_operation(graph, operation),
+            *DeterministicVerifier().verify_operation(graph, operation),
+        ]
+        for node_id in operation.output_node_ids:
+            records.extend(structure.verify_node(graph, node_id))
+            records.extend(provenance.verify_node(graph, graph.nodes[node_id]))
+        return records
 
     def _invoke_operation(
         self,
@@ -520,7 +733,10 @@ class ReasoningRuntime:
                     retries=self.model_retries,
                     label=label,
                 )
-                node_type, value = result.node_type, result.content
+                node_type = (
+                    NodeType.HYPOTHESIS if result.node_type == NodeType.FACT else result.node_type
+                )
+                value = result.content
         return (self._new_node(op.run_id, node_type, value, produced_by=op.operation_id),)
 
     @staticmethod
@@ -558,7 +774,12 @@ class ReasoningRuntime:
     ) -> tuple[ReasoningNode, ...]:
         request = op.model_copy(deep=True).parameters
         provided = tuple(item.model_copy(deep=True) for item in inputs)
-        raw = budget.invoke(lambda: tool.execute(request, provided), tool.timeout, tool.name)
+        raw = budget.invoke(
+            lambda: tool.execute(request, provided),
+            tool.timeout,
+            tool.name,
+            execution_id=op.operation_id,
+        )
         self._validate_tool_schema(tool, raw, tool.output_schema, "output")
         items = EVIDENCE_ITEMS.validate_python(raw)
         return tuple(

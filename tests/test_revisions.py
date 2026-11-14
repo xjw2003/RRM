@@ -27,7 +27,7 @@ def test_revision_keeps_history_and_only_invalidates_execution_descendants():
     assert all(graph.invalidations[n].cause_node_id == cost for n in report.stale_node_ids)
     assert graph.operations[compute.operation_id] == compute
     assert graph.run.status == RunStatus.PARTIAL and not graph.run.final_node_ids
-    assert tuple(graph.verifications) == records
+    assert all(record in graph.verifications for record in records)
     latest = runtime.verify_run(run_id)
     assert result_record(latest, compute.operation_id, "current_validity").status == "failed"
     assert result_record(latest, compute.operation_id, "deterministic").status == "passed"
