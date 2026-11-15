@@ -2,7 +2,7 @@
 
 RRM 是一个独立的 Python 推理运行时。模型每轮提出一项操作，运行时读取该操作声明的节点版本并执行。结果成为新节点。运行时在下一轮规划前执行适用的独立检查，符合使用条件的节点可以成为真实输入。节点、操作和数据依赖能独立保存、验证和回放。
 
-RRP（Reasoning Runtime Protocol）是本项目自定义的协议。包版本为 0.2.0，沿用 RRP v0.1 的操作协议，并通过可选字段保存版本、失效、步骤验证、恢复与超时记录。早期 SQLite 事件可直接读取。
+RRP（Reasoning Runtime Protocol）是本项目自定义的协议。包版本为 0.2.0。单轮任务使用 RRP v0.1，对话轮次使用 RRP v0.2。两种记录可共存于同一个 SQLite 数据库。早期 SQLite 事件可直接读取。
 
 | 方式 | 执行与记录 |
 | --- | --- |
@@ -94,6 +94,37 @@ python examples/basic_reasoning.py "比较增收与降本对利润的影响"
 确认原执行已停止后，用 `recover_run(run_id)` 协调持久化状态，再用 `resume(run_id)` 接续可运行的任务。恢复会验证已提交但待检查的输出，并为未完成操作记录 `interrupted`。可以通过报告里的 `pending_tool_operation_ids` 找到结果待确认的外部操作。核对外部系统后，以 `confirm_tool_outcome(run_id, operation_id, reason=...)` 记录确认。工具默认 `retry_safe=False`，只读或具有幂等保障的工具可明确设为 `True`。恢复本身只处理事件和验证。
 
 模型和工具适配器可在调用内使用 `rrm.adapters.current_invocation()` 获取执行标识与取消信号。中止记录区分传输请求超时、运行时等待超时、Run 截止和取消。未确认退出的调用标记为 `unknown`。详见 [当前边界](docs/limitations.md)。
+
+## 按需推理与跨轮复用
+
+首个 Planner 提案可以直接选择 `FINISH`。简单问题因此只需要一次规划调用和一次回答调用，实际图为问题 → 操作 → 结果。只执行 `FINISH` 的推理记录标记为 `DIRECT`。执行过检索、推断、比较或计算的记录标记为 `EXTENDED`，之后每一步仍由 Planner 根据现有结果选择。两种路径都执行逐步验证。模式由已记录的实际操作计算，内部 `IMPORT` 和 `REVISE` 不改变模式。
+
+可选的 `ConversationRuntime` 让每次 `ask()` 创建独立的 Run。用同一个 `conversation_id` 提交追问，随后可用 `list_turns()` 查询轮次、`get_run()` 查询单轮、`get_references()` 查询导入来源，以及 `get_conversation_graph()` 读取联合 DAG。
+
+```python
+from rrm.conversation import ConversationRuntime
+
+chat = ConversationRuntime(core=runtime)
+first = chat.ask("为什么收入增长，利润却下降？", conversation_id="C001")
+second = chat.ask("刚才成本增加了多少？", conversation_id="C001")
+combined = chat.get_conversation_graph("C001")
+for reference in chat.get_references("C001", second.run_id):
+    print(reference.source_run_id, reference.source_node_id, reference.source_revision)
+print(combined.ancestors((second.run_id, second.final_node_ids[0])))
+```
+
+连续性解析器在有历史时同时返回追问关系、少量候选节点和理由。可用离线规则、`MockContinuityResolver` 或自定义 `ContinuityResolver`。OpenAI-compatible 模型默认使用一次结构化模型调用，纳入同轮调用预算。适配器调用次数可通过结果中的 `model_calls` 查看。
+
+运行时重新核对候选节点的对话归属、轮次、可用性和内容，创建真实 `IMPORT` 操作和本轮节点。Planner 可以用本轮节点 ID 直接回答，或在该节点上继续计算。原始节点及其验证资格得到保留。若假设改变了历史前提，运行时拒绝导入依赖该前提的节点；本轮假设可参与计算，旧记录仍可回放。纠错意图保存为 `correction_pending`，等待显式审阅。
+
+```bash
+python examples/conversation_direct.py
+python examples/conversation_followup.py
+python examples/conversation_counterfactual.py --db conversation.db
+python examples/conversation_graph.py conversation.db CONVERSATION_ID
+```
+
+`CONVERSATION_ID` 取三轮示例首行输出。新的导入与后续使用会核对来源的当前状态。跨 Run 自动失效传播留待后续阶段。 [对话 API 和持久化](docs/conversation.md)
 
 ## 验证范围
 

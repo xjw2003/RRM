@@ -1,7 +1,7 @@
 import hashlib
 import json
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 from pydantic.json_schema import models_json_schema
@@ -39,7 +39,7 @@ def snapshot_hash(nodes: Sequence[NodeInput]) -> str:
     return content_hash([node.model_dump(mode="json") for node in nodes])
 
 
-def protocol_schema() -> dict[str, Any]:
+def protocol_schema(version: Literal["0.1", "0.2"] = "0.1") -> dict[str, Any]:
     models: list[type[BaseModel]] = [
         ReasoningRun,
         ReasoningNode,
@@ -55,5 +55,28 @@ def protocol_schema() -> dict[str, Any]:
         NodeUsability,
         RunEvent,
     ]
-    _, schema = models_json_schema([(model, "validation") for model in models], title="RRP v0.1")
+    _, schema = models_json_schema(
+        [(model, "validation") for model in models],
+        title=f"RRP v{version}",
+    )
+    if version == "0.1":
+        definitions = schema["$defs"]
+        definitions["ReasoningRun"]["properties"]["protocol_version"] = {
+            "const": "0.1",
+            "type": "string",
+            "default": "0.1",
+        }
+        kinds = definitions["ReasoningOperation"]["properties"]["operation_type"]["anyOf"]
+        kinds[-1] = {"const": "REVISE", "type": "string"}
+        for field in ("turn", "continuity", "reuse_decision", "cross_run_reference"):
+            definitions["RunEvent"]["properties"][field] = {"type": "null", "default": None}
+        for definition in (
+            "ContinuityRecord",
+            "ContinuityType",
+            "ConversationTurn",
+            "CrossRunReference",
+            "ReuseDecision",
+            "SourceNode",
+        ):
+            del definitions[definition]
     return {"$schema": "https://json-schema.org/draft/2020-12/schema", **schema}

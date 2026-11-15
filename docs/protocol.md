@@ -35,3 +35,11 @@ Reasoning Runtime Protocol 是 RRM 的自定义协议。Pydantic 定义位于 [m
 `ReasoningOperation.verification_required` 在新操作中启用。输出通过 `RunEvent.verified_operation_ids` 完成验证结算。验证记录与 `node_blocks` 同时写入。旧操作默认 `verification_required=False`，历史图可直接回放。接续含旧操作的 Run 时，运行时先补做适用检查，旧事件保留原样。
 
 `retry_safe` 在操作开始时保存。旧记录默认 `False`。恢复发现结果未知的工具操作时，使用此持久化设置判断是否等待确认。`invocation_stop` 可出现在操作和规划记录，包含 `execution_id`、停止原因、是否发出取消信号及本地调用是否已退出。工具调用的 `execution_id` 与其操作 ID 相同，便于对照外部日志。
+
+## RRP v0.2 对话扩展
+
+独立 Run 继续使用 v0.1，Conversation Turn 使用 v0.2。参见 [RRP v0.2 JSON Schema](../schemas/rrp-v0.2.schema.json)。现有模型提案仍使用原有操作集合和至少一个本地输入 ID 的约束。
+
+内部 `IMPORT` 操作使用空的本地输入列表。其输入哈希记录实际读取的来源节点快照。输出节点与 `CrossRunReference` 同事件保存，引用记录包含来源和目标 Run/节点 ID、来源修订号和哈希、读取时的来源事件序号、来源使用资格以及导入操作 ID。单轮 DAG 记录本地生产边，跨 Run 消费边由联合图从引用事件重建。
+
+`RunResult.reasoning_mode` 由实际操作推导。模型调用计数来自新事件中的调用开始标记，较早的记录没有精确调用计数。失败及重试的已启动调用计入统计。

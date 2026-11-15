@@ -49,7 +49,7 @@ class ProvenanceVerifier(Verifier):
     def verify_node(
         self, graph: ReasoningGraph, node: ReasoningNode
     ) -> Iterator[VerificationRecord]:
-        if node.node_type != NodeType.EVIDENCE:
+        if node.node_type != NodeType.EVIDENCE or node.node_id in graph.references:
             return
         provenance = node.provenance
         producer = graph.operations.get(node.produced_by or "")

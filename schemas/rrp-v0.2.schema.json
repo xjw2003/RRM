@@ -1,0 +1,1523 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ContinuityRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "continuity_type": {
+          "$ref": "#/$defs/ContinuityType"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "changed_premises": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SourceNode"
+          },
+          "maxItems": 8,
+          "title": "Changed Premises",
+          "type": "array"
+        }
+      },
+      "required": [
+        "continuity_type",
+        "reason"
+      ],
+      "title": "ContinuityRecord",
+      "type": "object"
+    },
+    "ContinuityType": {
+      "enum": [
+        "CONTINUE",
+        "COUNTERFACTUAL",
+        "CORRECTION",
+        "NEW_TOPIC"
+      ],
+      "title": "ContinuityType",
+      "type": "string"
+    },
+    "ConversationTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "turn_id": {
+          "minLength": 1,
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "conversation_id": {
+          "minLength": 1,
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "question": {
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "turn_index": {
+          "exclusiveMinimum": 0,
+          "title": "Turn Index",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "conversation_id",
+        "run_id",
+        "question",
+        "turn_index"
+      ],
+      "title": "ConversationTurn",
+      "type": "object"
+    },
+    "CrossRunReference": {
+      "additionalProperties": false,
+      "properties": {
+        "source_run_id": {
+          "minLength": 1,
+          "title": "Source Run Id",
+          "type": "string"
+        },
+        "source_node_id": {
+          "minLength": 1,
+          "title": "Source Node Id",
+          "type": "string"
+        },
+        "source_content_hash": {
+          "minLength": 1,
+          "title": "Source Content Hash",
+          "type": "string"
+        },
+        "source_revision": {
+          "exclusiveMinimum": 0,
+          "title": "Source Revision",
+          "type": "integer"
+        },
+        "source_sequence": {
+          "exclusiveMinimum": 0,
+          "title": "Source Sequence",
+          "type": "integer"
+        },
+        "source_usability": {
+          "enum": [
+            "eligible",
+            "unverified"
+          ],
+          "title": "Source Usability",
+          "type": "string"
+        },
+        "target_run_id": {
+          "minLength": 1,
+          "title": "Target Run Id",
+          "type": "string"
+        },
+        "target_node_id": {
+          "minLength": 1,
+          "title": "Target Node Id",
+          "type": "string"
+        },
+        "import_operation_id": {
+          "minLength": 1,
+          "title": "Import Operation Id",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_run_id",
+        "source_node_id",
+        "source_content_hash",
+        "source_revision",
+        "source_sequence",
+        "source_usability",
+        "target_run_id",
+        "target_node_id",
+        "import_operation_id"
+      ],
+      "title": "CrossRunReference",
+      "type": "object"
+    },
+    "DependencyType": {
+      "enum": [
+        "operation_consumes_node",
+        "operation_produces_node"
+      ],
+      "title": "DependencyType",
+      "type": "string"
+    },
+    "EvidenceItem": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document Id"
+        },
+        "document_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document Version"
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "title": "EvidenceItem",
+      "type": "object"
+    },
+    "EvidenceSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "source_type": {
+          "minLength": 1,
+          "title": "Source Type",
+          "type": "string"
+        },
+        "source_id": {
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document Id"
+        },
+        "document_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document Version"
+        },
+        "content": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "content_hash": {
+          "minLength": 1,
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "retrieved_at": {
+          "format": "date-time",
+          "title": "Retrieved At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_type",
+        "source_id",
+        "content",
+        "content_hash"
+      ],
+      "title": "EvidenceSnapshot",
+      "type": "object"
+    },
+    "FinalOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "minLength": 1,
+          "title": "Answer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "answer"
+      ],
+      "title": "FinalOutput",
+      "type": "object"
+    },
+    "InvocationStop": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "minLength": 1,
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "request_timeout",
+            "wait_timeout",
+            "run_timeout",
+            "cancelled"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "worker_state": {
+          "enum": [
+            "exited",
+            "unknown"
+          ],
+          "title": "Worker State",
+          "type": "string"
+        },
+        "cancellation_requested": {
+          "title": "Cancellation Requested",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution_id",
+        "reason",
+        "worker_state",
+        "cancellation_requested"
+      ],
+      "title": "InvocationStop",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "Limits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_steps": {
+          "default": 12,
+          "exclusiveMinimum": 0,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "max_model_calls": {
+          "default": 24,
+          "exclusiveMinimum": 0,
+          "title": "Max Model Calls",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "default": 120,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        }
+      },
+      "title": "Limits",
+      "type": "object"
+    },
+    "ModelOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "node_type": {
+          "enum": [
+            "fact",
+            "hypothesis",
+            "inference"
+          ],
+          "title": "Node Type",
+          "type": "string"
+        },
+        "content": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "node_type",
+        "content"
+      ],
+      "title": "ModelOutput",
+      "type": "object"
+    },
+    "NodeBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "cause_node_id": {
+          "minLength": 1,
+          "title": "Cause Node Id",
+          "type": "string"
+        },
+        "failed_checks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Failed Checks",
+          "type": "array"
+        },
+        "verification_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Ids",
+          "type": "array"
+        },
+        "reasons": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "cause_node_id",
+        "failed_checks",
+        "verification_ids"
+      ],
+      "title": "NodeBlock",
+      "type": "object"
+    },
+    "NodeInvalidation": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "stale",
+            "superseded",
+            "revoked"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "cause_node_id": {
+          "minLength": 1,
+          "title": "Cause Node Id",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "state",
+        "cause_node_id",
+        "reason"
+      ],
+      "title": "NodeInvalidation",
+      "type": "object"
+    },
+    "NodeState": {
+      "enum": [
+        "current",
+        "stale",
+        "superseded",
+        "revoked"
+      ],
+      "title": "NodeState",
+      "type": "string"
+    },
+    "NodeType": {
+      "enum": [
+        "question",
+        "fact",
+        "evidence",
+        "hypothesis",
+        "inference",
+        "result"
+      ],
+      "title": "NodeType",
+      "type": "string"
+    },
+    "NodeUsability": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_state": {
+          "$ref": "#/$defs/NodeState"
+        },
+        "status": {
+          "$ref": "#/$defs/UsabilityStatus"
+        },
+        "block": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "node_id",
+        "node_state",
+        "status"
+      ],
+      "title": "NodeUsability",
+      "type": "object"
+    },
+    "OperationProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "operation_type": {
+          "$ref": "#/$defs/OperationType"
+        },
+        "input_node_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Input Node Ids",
+          "type": "array"
+        },
+        "objective": {
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Parameters",
+          "type": "object"
+        }
+      },
+      "required": [
+        "operation_type",
+        "input_node_ids",
+        "objective"
+      ],
+      "title": "OperationProposal",
+      "type": "object"
+    },
+    "OperationStatus": {
+      "enum": [
+        "running",
+        "completed",
+        "failed",
+        "interrupted"
+      ],
+      "title": "OperationStatus",
+      "type": "string"
+    },
+    "OperationType": {
+      "enum": [
+        "RETRIEVE",
+        "INFER",
+        "COMPARE",
+        "COMPUTE",
+        "FINISH"
+      ],
+      "title": "OperationType",
+      "type": "string"
+    },
+    "PlanningRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "invocation_stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvocationStop"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "context_hash": {
+          "minLength": 1,
+          "title": "Context Hash",
+          "type": "string"
+        },
+        "proposed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperationProposal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id",
+        "context_hash"
+      ],
+      "title": "PlanningRecord",
+      "type": "object"
+    },
+    "ReasoningDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "edge_type": {
+          "$ref": "#/$defs/DependencyType"
+        },
+        "node_id": {
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "operation_id": {
+          "minLength": 1,
+          "title": "Operation Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "edge_type",
+        "node_id",
+        "operation_id"
+      ],
+      "title": "ReasoningDependency",
+      "type": "object"
+    },
+    "ReasoningMode": {
+      "enum": [
+        "DIRECT",
+        "EXTENDED"
+      ],
+      "title": "ReasoningMode",
+      "type": "string"
+    },
+    "ReasoningNode": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "content": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "produced_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Produced By"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Metadata",
+          "type": "object"
+        },
+        "content_hash": {
+          "minLength": 1,
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "logical_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logical Id"
+        },
+        "revision": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "supersedes_node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Node Id"
+        }
+      },
+      "required": [
+        "node_id",
+        "run_id",
+        "node_type",
+        "content",
+        "content_hash"
+      ],
+      "title": "ReasoningNode",
+      "type": "object"
+    },
+    "ReasoningOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "minLength": 1,
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "operation_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperationType"
+            },
+            {
+              "enum": [
+                "REVISE",
+                "IMPORT"
+              ],
+              "type": "string"
+            }
+          ],
+          "title": "Operation Type"
+        },
+        "input_node_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Node Ids",
+          "type": "array"
+        },
+        "output_node_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Node Ids",
+          "type": "array"
+        },
+        "provided_node_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Provided Node Ids",
+          "type": "array"
+        },
+        "executor_type": {
+          "enum": [
+            "model",
+            "tool",
+            "runtime"
+          ],
+          "title": "Executor Type",
+          "type": "string"
+        },
+        "executor_id": {
+          "minLength": 1,
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "objective": {
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "status": {
+          "$ref": "#/$defs/OperationStatus",
+          "default": "running"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "input_snapshot_hash": {
+          "minLength": 1,
+          "title": "Input Snapshot Hash",
+          "type": "string"
+        },
+        "output_snapshot_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Snapshot Hash"
+        },
+        "verification_required": {
+          "default": false,
+          "title": "Verification Required",
+          "type": "boolean"
+        },
+        "retry_safe": {
+          "default": false,
+          "title": "Retry Safe",
+          "type": "boolean"
+        },
+        "invocation_stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvocationStop"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "required": [
+        "operation_id",
+        "run_id",
+        "operation_type",
+        "input_node_ids",
+        "executor_type",
+        "executor_id",
+        "objective",
+        "input_snapshot_hash"
+      ],
+      "title": "ReasoningOperation",
+      "type": "object"
+    },
+    "ReasoningRun": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "goal": {
+          "minLength": 1,
+          "title": "Goal",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus",
+          "default": "created"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "protocol_version": {
+          "default": "0.1",
+          "enum": [
+            "0.1",
+            "0.2"
+          ],
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        },
+        "final_node_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Final Node Ids",
+          "type": "array"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "required": [
+        "run_id",
+        "goal",
+        "model_id"
+      ],
+      "title": "ReasoningRun",
+      "type": "object"
+    },
+    "RecoveryRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "recovery_id": {
+          "minLength": 1,
+          "title": "Recovery Id",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "interrupted_operation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Interrupted Operation Ids",
+          "type": "array"
+        },
+        "settled_operation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Settled Operation Ids",
+          "type": "array"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recovery_id",
+        "reason"
+      ],
+      "title": "RecoveryRecord",
+      "type": "object"
+    },
+    "RecoveryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "recovery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pending_tool_operation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Pending Tool Operation Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "status"
+      ],
+      "title": "RecoveryResult",
+      "type": "object"
+    },
+    "ReuseDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "source_run_id": {
+          "minLength": 1,
+          "title": "Source Run Id",
+          "type": "string"
+        },
+        "source_node_id": {
+          "minLength": 1,
+          "title": "Source Node Id",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "target_node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Node Id"
+        }
+      },
+      "required": [
+        "source_run_id",
+        "source_node_id",
+        "reason"
+      ],
+      "title": "ReuseDecision",
+      "type": "object"
+    },
+    "RunEvent": {
+      "additionalProperties": false,
+      "description": "One atomic change in an ordered, per-run event stream.",
+      "properties": {
+        "run": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasoningRun"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ReasoningNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "operations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ReasoningOperation"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "dependencies": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ReasoningDependency"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "planning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_call_started": {
+          "default": false,
+          "title": "Model Call Started",
+          "type": "boolean"
+        },
+        "invalidations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NodeInvalidation"
+          },
+          "title": "Invalidations",
+          "type": "array"
+        },
+        "verifications": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VerificationRecord"
+          },
+          "title": "Verifications",
+          "type": "array"
+        },
+        "verified_operation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Verified Operation Ids",
+          "type": "array"
+        },
+        "node_blocks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NodeBlock"
+          },
+          "title": "Node Blocks",
+          "type": "array"
+        },
+        "recovery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tool_confirmation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolConfirmation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConversationTurn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "continuity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContinuityRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reuse_decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReuseDecision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cross_run_reference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrossRunReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "RunEvent",
+      "type": "object"
+    },
+    "RunResult": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Answer"
+        },
+        "final_node_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Final Node Ids",
+          "type": "array"
+        },
+        "steps_executed": {
+          "title": "Steps Executed",
+          "type": "integer"
+        },
+        "reasoning_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasoningMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_calls": {
+          "default": 0,
+          "title": "Model Calls",
+          "type": "integer"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "required": [
+        "run_id",
+        "status",
+        "steps_executed"
+      ],
+      "title": "RunResult",
+      "type": "object"
+    },
+    "RunStatus": {
+      "enum": [
+        "created",
+        "running",
+        "completed",
+        "partial",
+        "failed",
+        "cancelled"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    },
+    "SourceNode": {
+      "additionalProperties": false,
+      "properties": {
+        "source_run_id": {
+          "minLength": 1,
+          "title": "Source Run Id",
+          "type": "string"
+        },
+        "source_node_id": {
+          "minLength": 1,
+          "title": "Source Node Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_run_id",
+        "source_node_id"
+      ],
+      "title": "SourceNode",
+      "type": "object"
+    },
+    "ToolConfirmation": {
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "minLength": 1,
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "reason"
+      ],
+      "title": "ToolConfirmation",
+      "type": "object"
+    },
+    "UsabilityStatus": {
+      "enum": [
+        "eligible",
+        "unverified",
+        "blocked",
+        "pending_verification",
+        "stale",
+        "superseded",
+        "revoked"
+      ],
+      "title": "UsabilityStatus",
+      "type": "string"
+    },
+    "VerificationRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "verification_id": {
+          "minLength": 1,
+          "title": "Verification Id",
+          "type": "string"
+        },
+        "target_id": {
+          "minLength": 1,
+          "title": "Target Id",
+          "type": "string"
+        },
+        "target_type": {
+          "enum": [
+            "run",
+            "node",
+            "operation"
+          ],
+          "title": "Target Type",
+          "type": "string"
+        },
+        "verifier_id": {
+          "minLength": 1,
+          "title": "Verifier Id",
+          "type": "string"
+        },
+        "verification_type": {
+          "minLength": 1,
+          "title": "Verification Type",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/VerificationStatus"
+        },
+        "details": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Details",
+          "type": "object"
+        },
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "verification_id",
+        "target_id",
+        "target_type",
+        "verifier_id",
+        "verification_type",
+        "status"
+      ],
+      "title": "VerificationRecord",
+      "type": "object"
+    },
+    "VerificationStatus": {
+      "enum": [
+        "passed",
+        "failed",
+        "not_verified",
+        "not_applicable"
+      ],
+      "title": "VerificationStatus",
+      "type": "string"
+    }
+  },
+  "title": "RRP v0.2"
+}

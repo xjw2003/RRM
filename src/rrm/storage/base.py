@@ -3,7 +3,13 @@ from abc import ABC, abstractmethod
 
 from rrm.exceptions import GraphError
 from rrm.graph.dag import ReasoningGraph
-from rrm.protocol.models import RunEvent
+from rrm.protocol.models import (
+    Conversation,
+    ConversationTurn,
+    CrossRunReference,
+    RunEvent,
+    SourceNode,
+)
 
 
 class StorageBackend(ABC):
@@ -14,6 +20,29 @@ class StorageBackend(ABC):
     @abstractmethod
     def events(self, run_id: str) -> tuple[RunEvent, ...]:
         """Read a consistent, ordered snapshot of one run's events."""
+
+    def create_conversation(self, conversation: Conversation) -> None:
+        """Create a conversation if its ID is absent."""
+        raise NotImplementedError("This backend does not support conversations")
+
+    def get_conversation(self, conversation_id: str) -> Conversation:
+        raise NotImplementedError("This backend does not support conversations")
+
+    def conversation_turns(self, conversation_id: str) -> tuple[ConversationTurn, ...]:
+        raise NotImplementedError("This backend does not support conversations")
+
+    def get_turn_by_run(self, run_id: str) -> ConversationTurn | None:
+        raise NotImplementedError("This backend does not support conversations")
+
+    def references(self, run_id: str) -> tuple[CrossRunReference, ...]:
+        return tuple(
+            event.cross_run_reference
+            for event in self.events(run_id)
+            if event.cross_run_reference is not None
+        )
+
+    def references_to(self, source: SourceNode) -> tuple[CrossRunReference, ...]:
+        raise NotImplementedError("This backend does not support conversations")
 
     def get_graph(
         self, run_id: str, *, through_sequence: int | None = None, audit: bool = False

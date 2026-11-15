@@ -26,3 +26,9 @@ flowchart LR
 - PostgreSQL 可实现 `StorageBackend.append()` 和 `events()`，在事务内分配每 Run 的序号并实现期望序号校验。
 - HTTP Server 可封装 Run 创建、接续、图查询与验证 API，服务层负责认证、访问隔离与请求调度。
 - Agent 框架可封装 `ModelAdapter` 或 `ToolAdapter`，也可把 RRM 作为可调用组件，使用 Run ID 查询结果和验证记录。
+
+## 对话层
+
+`ConversationRuntime` 在同一存储中协调多轮执行。每轮的初始事件同时保存新 Run、问题节点和 Turn。连续性解析只接收有限的历史节点摘要。来源解析和输入校验通过真实节点版本完成，普通模型提案仍只能使用本地节点 ID。
+
+`IMPORT` 提交将本地结果节点、引用记录、产出边和反向查询索引放在同一个事务中。写入时核对来源事件序号。联合图使用 `(run_id, vertex_id)` 标识顶点，根据持久化引用建立跨轮边。轮次顺序用于限制边的合法方向。详见 [对话与复用](conversation.md)。

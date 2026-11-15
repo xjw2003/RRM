@@ -32,7 +32,7 @@ class StructuralVerifier(Verifier):
             problems.append(f"Operation did not complete successfully ({op.status})")
         elif op.completed_at < op.started_at:
             problems.append("Operation timestamps are out of order")
-        if op.operation_type != "REVISE" and not op.input_node_ids:
+        if op.operation_type not in {"REVISE", "IMPORT"} and not op.input_node_ids:
             problems.append("Operation has no declared inputs")
         if op.status == OperationStatus.COMPLETED:
             if op.operation_type != OperationType.RETRIEVE and len(op.output_node_ids) != 1:
@@ -69,8 +69,11 @@ class StructuralVerifier(Verifier):
             nodes = [graph.nodes[node_id] for node_id in ids]
             if any(node.run_id != op.run_id for node in nodes):
                 problems.append(f"{label.capitalize()} belongs to a different run")
-            if (label == "input" or op.status == OperationStatus.COMPLETED) and (
-                snapshot_hash([node_input(node) for node in nodes]) != saved_hash
+            checks_local_snapshot = label != "input" or op.operation_type != "IMPORT"
+            if (
+                checks_local_snapshot
+                and (label == "input" or op.status == OperationStatus.COMPLETED)
+                and (snapshot_hash([node_input(node) for node in nodes]) != saved_hash)
             ):
                 problems.append(f"{label.capitalize()} snapshot hash mismatch")
         missing_declared = set(op.input_node_ids) - graph.nodes.keys()

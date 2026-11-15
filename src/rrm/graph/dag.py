@@ -5,6 +5,9 @@ from typing import Any, Self
 
 from rrm.exceptions import GraphError
 from rrm.protocol.models import (
+    ContinuityRecord,
+    ConversationTurn,
+    CrossRunReference,
     NodeBlock,
     NodeInvalidation,
     NodeState,
@@ -14,10 +17,12 @@ from rrm.protocol.models import (
     OperationType,
     PlanningRecord,
     ReasoningDependency,
+    ReasoningMode,
     ReasoningNode,
     ReasoningOperation,
     ReasoningRun,
     RecoveryRecord,
+    ReuseDecision,
     RunEvent,
     ToolConfirmation,
     UsabilityStatus,
@@ -44,8 +49,27 @@ class ReasoningGraph:
         self.tool_confirmations: dict[str, ToolConfirmation] = {}
         self.audit_issues: list[tuple[str, str]] = []
         self.sequence = 0
+        self.model_calls = 0
+        self.turn: ConversationTurn | None = None
+        self.continuity: ContinuityRecord | None = None
+        self.references: dict[str, CrossRunReference] = {}
+        self.reuse_decisions: list[ReuseDecision] = []
+        self.unavailable_imports: set[str] = set()
         self._parents: dict[str, set[str]] = defaultdict(set)
         self._children: dict[str, set[str]] = defaultdict(set)
+
+    @property
+    def reasoning_mode(self) -> ReasoningMode | None:
+        executed = {
+            op.operation_type
+            for op in self.operations.values()
+            if isinstance(op.operation_type, OperationType)
+        }
+        if not executed:
+            return None
+        return (
+            ReasoningMode.DIRECT if executed == {OperationType.FINISH} else ReasoningMode.EXTENDED
+        )
 
     def add_node(self, node: ReasoningNode) -> None:
         if node.run_id != self.run.run_id or (
@@ -128,13 +152,15 @@ class ReasoningGraph:
         block = self.node_blocks.get(node_id)
         if state != NodeState.CURRENT:
             status = UsabilityStatus(state.value)
-        elif block is not None:
+        elif block is not None or node_id in self.unavailable_imports:
             status = UsabilityStatus.BLOCKED
         else:
             node = self.nodes[node_id]
             op = self.operations.get(node.produced_by or "")
             if op and op.verification_required and op.operation_id not in self.verified_operations:
                 status = UsabilityStatus.PENDING
+            elif node_id in self.references:
+                status = self.references[node_id].source_usability
             elif node.node_type == NodeType.QUESTION:
                 status = UsabilityStatus.ELIGIBLE
             elif op is None or op.executor_type == "model" or op.operation_type == "REVISE":
@@ -193,6 +219,10 @@ class ReasoningGraph:
             draft.recoveries = self.recoveries.copy()
         if event.tool_confirmation is not None:
             draft.tool_confirmations = self.tool_confirmations.copy()
+        if event.cross_run_reference is not None:
+            draft.references = self.references.copy()
+        if event.reuse_decision is not None:
+            draft.reuse_decisions = self.reuse_decisions.copy()
         draft.apply(event)
         return draft
 
@@ -295,6 +325,62 @@ class ReasoningGraph:
                 reject(op_id, GraphError("Tool confirmation requires a pending operation"))
             else:
                 self.tool_confirmations[op_id] = event.tool_confirmation
+        if event.turn is not None:
+            if (
+                self.sequence
+                or event.turn.run_id != self.run.run_id
+                or self.run.protocol_version != "0.2"
+            ):
+                reject(
+                    self.run.run_id, GraphError("Turn must be attached to a v0.2 creation event")
+                )
+            else:
+                self.turn = event.turn
+        if event.continuity is not None:
+            if self.turn is None or self.continuity is not None:
+                reject(self.run.run_id, GraphError("Continuity requires a turn and one decision"))
+            else:
+                self.continuity = event.continuity
+        if event.reuse_decision is not None:
+            self.reuse_decisions.append(event.reuse_decision)
+        ref = event.cross_run_reference
+        for op in event.operations:
+            if op.operation_type != "IMPORT":
+                continue
+            if (
+                self.turn is None
+                or op.input_node_ids
+                or op.provided_node_ids
+                or (
+                    op.status == OperationStatus.COMPLETED
+                    and (
+                        ref is None
+                        or ref.import_operation_id != op.operation_id
+                        or op.output_node_ids != (ref.target_node_id,)
+                        or ref.target_node_id not in {node.node_id for node in event.nodes}
+                    )
+                )
+            ):
+                reject(
+                    op.operation_id,
+                    GraphError("Invalid IMPORT operation or missing atomic reference"),
+                )
+        if ref is not None:
+            op = self.operations.get(ref.import_operation_id)
+            if (
+                self.turn is None
+                or ref.target_run_id != self.run.run_id
+                or ref.source_run_id == self.run.run_id
+                or op is None
+                or op not in event.operations
+                or op.operation_type != "IMPORT"
+                or op.status != OperationStatus.COMPLETED
+                or ref.target_node_id in self.references
+            ):
+                reject(ref.import_operation_id, GraphError("Invalid cross-run reference"))
+            else:
+                self.references[ref.target_node_id] = ref
+        self.model_calls += event.model_call_started
         self.sequence += 1
 
     @classmethod
@@ -312,6 +398,16 @@ class ReasoningGraph:
     def to_dict(self) -> dict[str, Any]:
         return {
             "run": self.run.model_dump(mode="json"),
+            "reasoning_mode": self.reasoning_mode,
+            "model_calls": self.model_calls,
+            "turn": self.turn.model_dump(mode="json") if self.turn else None,
+            "continuity": self.continuity.model_dump(mode="json") if self.continuity else None,
+            "cross_run_references": [
+                ref.model_dump(mode="json") for ref in self.references.values()
+            ],
+            "reuse_decisions": [
+                decision.model_dump(mode="json") for decision in self.reuse_decisions
+            ],
             "nodes": [node.model_dump(mode="json") for node in self.nodes.values()],
             "operations": [op.model_dump(mode="json") for op in self.operations.values()],
             "dependencies": [edge.model_dump(mode="json") for edge in self.dependencies],

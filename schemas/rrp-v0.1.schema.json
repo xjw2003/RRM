@@ -532,6 +532,14 @@
       "title": "ReasoningDependency",
       "type": "object"
     },
+    "ReasoningMode": {
+      "enum": [
+        "DIRECT",
+        "EXTENDED"
+      ],
+      "title": "ReasoningMode",
+      "type": "string"
+    },
     "ReasoningNode": {
       "additionalProperties": false,
       "properties": {
@@ -826,9 +834,8 @@
         },
         "protocol_version": {
           "const": "0.1",
-          "default": "0.1",
-          "title": "Protocol Version",
-          "type": "string"
+          "type": "string",
+          "default": "0.1"
         },
         "limits": {
           "$ref": "#/$defs/Limits"
@@ -992,6 +999,11 @@
           ],
           "default": null
         },
+        "model_call_started": {
+          "default": false,
+          "title": "Model Call Started",
+          "type": "boolean"
+        },
         "invalidations": {
           "default": [],
           "items": {
@@ -1045,6 +1057,22 @@
             }
           ],
           "default": null
+        },
+        "turn": {
+          "type": "null",
+          "default": null
+        },
+        "continuity": {
+          "type": "null",
+          "default": null
+        },
+        "reuse_decision": {
+          "type": "null",
+          "default": null
+        },
+        "cross_run_reference": {
+          "type": "null",
+          "default": null
         }
       },
       "title": "RunEvent",
@@ -1083,6 +1111,22 @@
         },
         "steps_executed": {
           "title": "Steps Executed",
+          "type": "integer"
+        },
+        "reasoning_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasoningMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_calls": {
+          "default": 0,
+          "title": "Model Calls",
           "type": "integer"
         },
         "error": {

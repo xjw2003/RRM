@@ -3,6 +3,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import Field
+
 from rrm.protocol.models import NodeBlock, NodeInput, OperationType, Record
 
 
@@ -18,6 +20,7 @@ class PlanningContext(Record):
     tools: tuple[ToolDescription, ...]
     unverified_node_ids: tuple[str, ...] = ()
     blocked_nodes: tuple[NodeBlock, ...] = ()
+    imported_node_labels: dict[str, str] = Field(default_factory=dict)
 
 
 class ExecutionContext(Record):

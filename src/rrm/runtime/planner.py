@@ -24,10 +24,13 @@ Response = TypeVar("Response", bound=BaseModel)
 
 
 class ExecutionBudget:
-    def __init__(self, limits: Limits) -> None:
+    def __init__(
+        self, limits: Limits, *, record_model_call: Callable[[], None] | None = None
+    ) -> None:
         self.limits = limits
         self.deadline = monotonic() + limits.timeout_seconds
         self.model_calls = 0
+        self.record_model_call = record_model_call
         self.tokens = 0
 
     def check_time(self) -> float:
@@ -119,6 +122,8 @@ class ExecutionBudget:
         last_error: str | None = None
         for _ in range(retries + 1):
             self.check_model()
+            if self.record_model_call is not None:
+                self.record_model_call()
             self.model_calls += 1
             try:
                 reply = self.invoke(function, timeout, label)

@@ -101,4 +101,12 @@ class ContextSelector:
                 if usability[summary.node_id].status == UsabilityStatus.UNVERIFIED
             ),
             blocked_nodes=tuple(islice(blocks, self.max_nodes)),
+            imported_node_labels={
+                node_id: available[node_id].provenance.document_id[: self.max_summary_chars]
+                for node_id in available
+                if node_id in selected
+                and node_id in graph.references
+                and available[node_id].provenance is not None
+                and available[node_id].provenance.document_id
+            },
         )

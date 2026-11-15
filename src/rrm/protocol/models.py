@@ -18,6 +18,11 @@ class Record(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
+class ReasoningMode(StrEnum):
+    DIRECT = "DIRECT"
+    EXTENDED = "EXTENDED"
+
+
 class RunStatus(StrEnum):
     CREATED = "created"
     RUNNING = "running"
@@ -114,7 +119,7 @@ class ReasoningRun(Record):
     updated_at: datetime = Field(default_factory=now)
     status: RunStatus = RunStatus.CREATED
     model_id: NonEmpty
-    protocol_version: Literal["0.1"] = PROTOCOL_VERSION
+    protocol_version: Literal["0.1", "0.2"] = PROTOCOL_VERSION
     limits: Limits = Field(default_factory=Limits)
     final_node_ids: tuple[str, ...] = ()
     error: str | None = None
@@ -177,7 +182,7 @@ class InvocationStop(Record):
 class ReasoningOperation(Record):
     operation_id: NonEmpty
     run_id: NonEmpty
-    operation_type: OperationType | Literal["REVISE"]
+    operation_type: OperationType | Literal["REVISE", "IMPORT"]
     input_node_ids: tuple[str, ...]
     output_node_ids: tuple[str, ...] = ()
     provided_node_ids: tuple[str, ...] = ()
@@ -279,6 +284,8 @@ class RunResult(Record):
     answer: str | None = None
     final_node_ids: tuple[str, ...] = ()
     steps_executed: int
+    reasoning_mode: ReasoningMode | None = None
+    model_calls: int = 0
     error: str | None = None
 
 
@@ -303,6 +310,55 @@ class RecoveryResult(Record):
     pending_tool_operation_ids: tuple[str, ...] = ()
 
 
+class ContinuityType(StrEnum):
+    CONTINUE = "CONTINUE"
+    COUNTERFACTUAL = "COUNTERFACTUAL"
+    CORRECTION = "CORRECTION"
+    NEW_TOPIC = "NEW_TOPIC"
+
+
+class Conversation(Record):
+    conversation_id: NonEmpty
+    created_at: datetime = Field(default_factory=now)
+    updated_at: datetime = Field(default_factory=now)
+
+
+class ConversationTurn(Record):
+    turn_id: NonEmpty
+    conversation_id: NonEmpty
+    run_id: NonEmpty
+    question: NonEmpty
+    turn_index: PositiveInt
+    created_at: datetime = Field(default_factory=now)
+
+
+class SourceNode(Record):
+    source_run_id: NonEmpty
+    source_node_id: NonEmpty
+
+
+class CrossRunReference(SourceNode):
+    source_content_hash: NonEmpty
+    source_revision: PositiveInt
+    source_sequence: PositiveInt
+    source_usability: Literal[UsabilityStatus.ELIGIBLE, UsabilityStatus.UNVERIFIED]
+    target_run_id: NonEmpty
+    target_node_id: NonEmpty
+    import_operation_id: NonEmpty
+    created_at: datetime = Field(default_factory=now)
+
+
+class ReuseDecision(SourceNode):
+    reason: NonEmpty
+    target_node_id: str | None = None
+
+
+class ContinuityRecord(Record):
+    continuity_type: ContinuityType
+    reason: NonEmpty
+    changed_premises: tuple[SourceNode, ...] = Field(default=(), max_length=8)
+
+
 class RunEvent(Record):
     """One atomic change in an ordered, per-run event stream."""
 
@@ -311,9 +367,14 @@ class RunEvent(Record):
     operations: tuple[ReasoningOperation, ...] = ()
     dependencies: tuple[ReasoningDependency, ...] = ()
     planning: PlanningRecord | None = None
+    model_call_started: bool = False
     invalidations: tuple[NodeInvalidation, ...] = ()
     verifications: tuple[VerificationRecord, ...] = ()
     verified_operation_ids: tuple[str, ...] = ()
     node_blocks: tuple[NodeBlock, ...] = ()
     recovery: RecoveryRecord | None = None
     tool_confirmation: ToolConfirmation | None = None
+    turn: ConversationTurn | None = None
+    continuity: ContinuityRecord | None = None
+    reuse_decision: ReuseDecision | None = None
+    cross_run_reference: CrossRunReference | None = None

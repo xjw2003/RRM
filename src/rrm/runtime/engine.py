@@ -18,6 +18,8 @@ from rrm.exceptions import (
 from rrm.graph.dag import ReasoningGraph
 from rrm.graph.dependencies import propagate_invalidation
 from rrm.protocol.models import (
+    ContinuityType,
+    ConversationTurn,
     DependencyType,
     EvidenceSnapshot,
     FinalOutput,
@@ -60,6 +62,7 @@ from rrm.verification import (
     StructuralVerifier,
 )
 from rrm.verification.failure import FailureReport, inspect_failure
+from rrm.verification.reference import ReferenceVerifier
 from rrm.verification.usability import blocked_nodes
 
 
@@ -108,7 +111,12 @@ class ReasoningRuntime:
         self, run_id: str, *, sources: Iterable[SourceAdapter] = ()
     ) -> tuple[VerificationRecord, ...]:
         graph = self.storage.get_graph(run_id, audit=True)
-        verifiers = (StructuralVerifier(), ProvenanceVerifier(sources), DeterministicVerifier())
+        verifiers = (
+            StructuralVerifier(),
+            ProvenanceVerifier(sources),
+            DeterministicVerifier(),
+            ReferenceVerifier(self.storage),
+        )
         records = tuple(record for verifier in verifiers for record in verifier.verify(graph))
         if graph.run.status != RunStatus.RUNNING:
             blocks = blocked_nodes(graph, records)
@@ -143,7 +151,9 @@ class ReasoningRuntime:
         return inspect_failure(graph, node_id)
 
     def get_node_usability(self, run_id: str, node_id: str) -> NodeUsability:
-        return self.get_graph(run_id).node_usability(node_id)
+        graph = self.get_graph(run_id)
+        self._refresh_imports(graph)
+        return graph.node_usability(node_id)
 
     def get_node(self, run_id: str, node_id: str) -> ReasoningNode:
         return self.get_graph(run_id).nodes[node_id]
@@ -213,19 +223,26 @@ class ReasoningRuntime:
         self._append(graph, RunEvent(run=run))
 
     def run(self, goal: str, *, limits: Limits | None = None) -> RunResult:
+        graph = self._create_run(goal, limits=limits)
+        self._set_status(graph, RunStatus.RUNNING)
+        return self._drive(graph, graph.run.limits)
+
+    def _create_run(
+        self, goal: str, *, limits: Limits | None = None, turn: ConversationTurn | None = None
+    ) -> ReasoningGraph:
         if not goal.strip():
             raise ValueError("goal must not be blank")
         run = ReasoningRun(
-            run_id=uuid4().hex,
+            run_id=turn.run_id if turn else uuid4().hex,
             goal=goal,
+            protocol_version="0.2" if turn else "0.1",
             model_id=self.model.model_id,
             limits=limits if limits is not None else Limits(),
         )
         graph = ReasoningGraph(run)
         question = self._new_node(run.run_id, NodeType.QUESTION, goal)
-        self._append(graph, RunEvent(run=run, nodes=(question,)))
-        self._set_status(graph, RunStatus.RUNNING)
-        return self._drive(graph, run.limits)
+        self._append(graph, RunEvent(run=run, nodes=(question,), turn=turn))
+        return graph
 
     def recover_run(
         self, run_id: str, *, reason: str = "Execution owner stopped before completion"
@@ -328,6 +345,10 @@ class ReasoningRuntime:
         graph = self.get_graph(run_id)
         if graph.run.status == RunStatus.RUNNING:
             raise RRMError("Cannot resume a running run; recover it after its execution stops")
+        if graph.turn is not None and graph.continuity is None:
+            raise RRMError("Turn stopped before continuity was recorded; submit the question again")
+        if graph.continuity and graph.continuity.continuity_type == ContinuityType.CORRECTION:
+            raise RRMError("Correction requires explicit review before starting a new turn")
         if graph.pending_tool_operations():
             raise RRMError("Confirm the outcome of pending tool operations before resuming")
         if any(
@@ -453,6 +474,7 @@ class ReasoningRuntime:
         return graph.run.model_copy(update=update)
 
     def _plan(self, graph: ReasoningGraph, budget: ExecutionBudget) -> OperationProposal:
+        self._refresh_imports(graph)
         context = self.context_selector.select(
             graph,
             (
@@ -491,8 +513,20 @@ class ReasoningRuntime:
             on_attempt=log,
         )
 
-    def _drive(self, graph: ReasoningGraph, limits: Limits) -> RunResult:
-        budget = ExecutionBudget(limits)
+    def _budget(self, graph: ReasoningGraph, limits: Limits) -> ExecutionBudget:
+        return ExecutionBudget(
+            limits,
+            record_model_call=lambda: self._append(graph, RunEvent(model_call_started=True)),
+        )
+
+    def _drive(
+        self,
+        graph: ReasoningGraph,
+        limits: Limits,
+        *,
+        budget: ExecutionBudget | None = None,
+    ) -> RunResult:
+        budget = budget if budget is not None else self._budget(graph, limits)
         try:
             for _ in range(limits.max_steps):
                 proposal = self._plan(graph, budget)
@@ -529,11 +563,23 @@ class ReasoningRuntime:
             answer=answer if isinstance(answer, str) else None,
             final_node_ids=run.final_node_ids,
             steps_executed=sum(op.operation_type != "REVISE" for op in graph.operations.values()),
+            reasoning_mode=graph.reasoning_mode,
+            model_calls=graph.model_calls,
             error=run.error,
         )
 
-    @staticmethod
-    def _inputs(graph: ReasoningGraph, ids: tuple[str, ...]) -> tuple[NodeInput, ...]:
+    def _refresh_imports(self, graph: ReasoningGraph) -> None:
+        graph.unavailable_imports.clear()
+        verifier = ReferenceVerifier(self.storage)
+        for node_id, reference in graph.references.items():
+            try:
+                verifier.check_reference(graph, reference)
+            except InvalidReference:
+                graph.unavailable_imports.add(node_id)
+                graph.unavailable_imports.update(graph.descendants(node_id) & graph.nodes.keys())
+
+    def _inputs(self, graph: ReasoningGraph, ids: tuple[str, ...]) -> tuple[NodeInput, ...]:
+        ReferenceVerifier(self.storage).check_inputs(graph, ids)
         inputs = []
         for node_id in ids:
             node = graph.nodes.get(node_id)
@@ -603,6 +649,7 @@ class ReasoningRuntime:
         )
         try:
             nodes = self._invoke_operation(operation, inputs, tool, budget)
+            ReferenceVerifier(self.storage).check_inputs(graph, operation.provided_node_ids)
             budget.check_time()
             output_ids = tuple(node.node_id for node in nodes)
             completed = operation.model_copy(
@@ -680,9 +727,8 @@ class ReasoningRuntime:
         )
         return finished
 
-    @staticmethod
     def _step_records(
-        graph: ReasoningGraph, operation: ReasoningOperation
+        self, graph: ReasoningGraph, operation: ReasoningOperation
     ) -> list[VerificationRecord]:
         structure = StructuralVerifier()
         provenance = ProvenanceVerifier()
@@ -693,6 +739,22 @@ class ReasoningRuntime:
         for node_id in operation.output_node_ids:
             records.extend(structure.verify_node(graph, node_id))
             records.extend(provenance.verify_node(graph, graph.nodes[node_id]))
+            if node_id in graph.references:
+                records.append(
+                    ReferenceVerifier(self.storage).verify_node(graph, graph.references[node_id])
+                )
+        try:
+            ReferenceVerifier(self.storage).check_inputs(graph, operation.provided_node_ids)
+        except InvalidReference as exc:
+            records.append(
+                ReferenceVerifier(self.storage).record(
+                    operation.operation_id,
+                    "operation",
+                    "cross_run_reference",
+                    VerificationStatus.FAILED,
+                    reason=str(exc),
+                )
+            )
         return records
 
     def _invoke_operation(
